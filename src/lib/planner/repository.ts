@@ -1,0 +1,219 @@
+import { db, uid } from "./db";
+import {
+  availabilitySchema,
+  examGoalSchema,
+  learningObjectiveSchema,
+  studyActivitySchema,
+  subjectSchema,
+  topicSchema,
+  unitSchema,
+} from "./schemas";
+import type {
+  Availability,
+  ExamGoal,
+  LearningObjective,
+  StudyActivity,
+  Subject,
+  Topic,
+  Unit,
+} from "./types";
+
+type OmitId<T> = Omit<T, "id">;
+
+function omitKey<T extends Record<string, unknown>>(record: T, key: string): T {
+  const { [key]: _removed, ...rest } = record;
+  return rest as T;
+}
+
+function omitKeys<T extends Record<string, unknown>>(record: T, keys: Set<string>): T {
+  const result = { ...record };
+  for (const key of keys) delete result[key];
+  return result;
+}
+
+// --- Curriculum ---
+
+export async function createSubject(title: string): Promise<Subject> {
+  const subject = subjectSchema.parse({ id: uid(), title });
+  await db.subjects.add(subject);
+  return subject;
+}
+
+export async function createUnit(subjectId: string, title: string): Promise<Unit> {
+  const unit = unitSchema.parse({ id: uid(), subjectId, title });
+  await db.units.add(unit);
+  return unit;
+}
+
+export async function createTopic(subjectId: string, unitId: string, title: string): Promise<Topic> {
+  const topic = topicSchema.parse({ id: uid(), subjectId, unitId, title });
+  await db.topics.add(topic);
+  return topic;
+}
+
+export async function createObjective(input: OmitId<LearningObjective>): Promise<LearningObjective> {
+  const objective = learningObjectiveSchema.parse({ ...input, id: uid() });
+  const pruned = await prunePrerequisites(objective);
+  await db.objectives.add(pruned);
+  return pruned;
+}
+
+export async function updateObjective(objective: LearningObjective): Promise<void> {
+  const parsed = learningObjectiveSchema.parse(objective);
+  await db.objectives.put(await prunePrerequisites(parsed));
+}
+
+/** Only keep prerequisites that actually exist (and never allow self-reference). */
+async function prunePrerequisites(objective: LearningObjective): Promise<LearningObjective> {
+  const existing = new Set<string>(await db.objectives.toCollection().primaryKeys());
+  return {
+    ...objective,
+    prerequisiteIds: objective.prerequisiteIds.filter(
+      (id) => existing.has(id) && id !== objective.id,
+    ),
+  };
+}
+
+async function removePrerequisiteReferences(objectiveIds: string[]): Promise<void> {
+  if (objectiveIds.length === 0) return;
+  const removed = new Set(objectiveIds);
+  const objectives = await db.objectives.toArray();
+  const updates = objectives
+    .filter((objective) => objective.prerequisiteIds.some((id) => removed.has(id)))
+    .map((objective) => ({
+      ...objective,
+      prerequisiteIds: objective.prerequisiteIds.filter((id) => !removed.has(id)),
+    }));
+  await Promise.all(updates.map((objective) => db.objectives.put(objective)));
+}
+
+async function cleanGoalsForRemoved(input: {
+  subjectId?: string;
+  topicIds: string[];
+}): Promise<void> {
+  const topicSet = new Set(input.topicIds);
+  const goals = await db.examGoals.toArray();
+  const changed = goals.filter((goal) => {
+    const subjectTouched =
+      input.subjectId !== undefined &&
+      (goal.subjectIds.includes(input.subjectId) || input.subjectId in goal.subjectWeighting);
+    const topicsTouched =
+      goal.optionalTopicIds.some((id) => topicSet.has(id)) ||
+      Object.keys(goal.topicPriorities).some((id) => topicSet.has(id));
+    return subjectTouched || topicsTouched;
+  });
+
+  await Promise.all(
+    changed.map((goal) =>
+      db.examGoals.put({
+        ...goal,
+        subjectIds:
+          input.subjectId !== undefined
+            ? goal.subjectIds.filter((id) => id !== input.subjectId)
+            : goal.subjectIds,
+        subjectWeighting:
+          input.subjectId !== undefined
+            ? omitKey(goal.subjectWeighting, input.subjectId)
+            : goal.subjectWeighting,
+        optionalTopicIds: goal.optionalTopicIds.filter((id) => !topicSet.has(id)),
+        topicPriorities: omitKeys(goal.topicPriorities, topicSet),
+      }),
+    ),
+  );
+}
+
+export async function deleteSubject(subjectId: string): Promise<void> {
+  await db.transaction(
+    "rw",
+    [db.subjects, db.units, db.topics, db.objectives, db.examGoals],
+    async () => {
+      const topicIds = (await db.topics.where("subjectId").equals(subjectId).toArray()).map(
+        (topic) => topic.id,
+      );
+      const objectiveIds = (
+        await db.objectives.where("subjectId").equals(subjectId).toArray()
+      ).map((objective) => objective.id);
+
+      await db.objectives.where("subjectId").equals(subjectId).delete();
+      await db.topics.where("subjectId").equals(subjectId).delete();
+      await db.units.where("subjectId").equals(subjectId).delete();
+      await db.subjects.delete(subjectId);
+
+      await removePrerequisiteReferences(objectiveIds);
+      await cleanGoalsForRemoved({ subjectId, topicIds });
+    },
+  );
+}
+
+export async function deleteUnit(unitId: string): Promise<void> {
+  await db.transaction("rw", [db.units, db.topics, db.objectives, db.examGoals], async () => {
+    const topics = await db.topics.where("unitId").equals(unitId).toArray();
+    const topicIds = topics.map((topic) => topic.id);
+    const objectiveIds = topicIds.length
+      ? (await db.objectives.where("topicId").anyOf(topicIds).toArray()).map(
+          (objective) => objective.id,
+        )
+      : [];
+
+    if (topicIds.length) await db.objectives.where("topicId").anyOf(topicIds).delete();
+    await db.topics.where("unitId").equals(unitId).delete();
+    await db.units.delete(unitId);
+
+    await removePrerequisiteReferences(objectiveIds);
+    await cleanGoalsForRemoved({ topicIds });
+  });
+}
+
+export async function deleteTopic(topicId: string): Promise<void> {
+  await db.transaction("rw", [db.topics, db.objectives, db.examGoals], async () => {
+    const objectiveIds = (await db.objectives.where("topicId").equals(topicId).toArray()).map(
+      (objective) => objective.id,
+    );
+    await db.objectives.where("topicId").equals(topicId).delete();
+    await db.topics.delete(topicId);
+
+    await removePrerequisiteReferences(objectiveIds);
+    await cleanGoalsForRemoved({ topicIds: [topicId] });
+  });
+}
+
+export async function deleteObjective(objectiveId: string): Promise<void> {
+  await db.transaction("rw", [db.objectives], async () => {
+    await db.objectives.delete(objectiveId);
+    await removePrerequisiteReferences([objectiveId]);
+  });
+}
+
+// --- Exam goals ---
+
+export async function createExamGoal(input: OmitId<ExamGoal>): Promise<ExamGoal> {
+  const goal = examGoalSchema.parse({ ...input, id: uid() });
+  await db.examGoals.add(goal);
+  return goal;
+}
+
+export async function updateExamGoal(goal: ExamGoal): Promise<void> {
+  await db.examGoals.put(examGoalSchema.parse(goal));
+}
+
+export async function deleteExamGoal(goalId: string): Promise<void> {
+  await db.examGoals.delete(goalId);
+}
+
+// --- Availability ---
+
+export async function saveAvailability(input: Availability): Promise<void> {
+  await db.availability.put(availabilitySchema.parse(input));
+}
+
+// --- Activities (stored and queryable; scheduling arrives in phase 3) ---
+
+export async function addActivity(input: OmitId<StudyActivity>): Promise<StudyActivity> {
+  const activity = studyActivitySchema.parse({ ...input, id: uid() });
+  await db.activities.add(activity);
+  return activity;
+}
+
+export async function activitiesForDate(date: string): Promise<StudyActivity[]> {
+  return db.activities.where("date").equals(date).toArray();
+}
