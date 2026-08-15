@@ -1,11 +1,11 @@
 {
-  "name": "freebuff.com application",
-  "short_name": "freebuff.com",
-  "description": "freebuff.com application",
+  "name": "Study Compass",
+  "short_name": "Compass",
+  "description": "Offline-first study planner and progress companion for customers of your business.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#000000",
+  "theme_color": "#3159b7",
   "icons": [
     {
       "src": "/logo.png",

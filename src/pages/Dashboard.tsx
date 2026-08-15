@@ -16,7 +16,6 @@ import {
 } from "@/lib/planner";
 import {
   ArrowRight,
-  BookOpen,
   CalendarDays,
   Check,
   ChevronRight,
@@ -27,7 +26,6 @@ import {
   Gauge,
   GraduationCap,
   LayoutDashboard,
-  ListChecks,
   LockKeyhole,
   LogOut,
   MoreHorizontal,
@@ -47,13 +45,7 @@ import { toast } from "sonner";
 
 type View = "overview" | "week" | "roadmap";
 
-const STORAGE_KEY = "studyflow-planner-v1";
-
-const subjectStyles: Record<string, string> = {
-  Biology: "bg-[#e5f1ff] text-[#28547a] border-[#c4dcf5]",
-  Chemistry: "bg-[#f1eafa] text-[#684789] border-[#e0caef]",
-  Mixed: "bg-[#e8f3ec] text-[#38634c] border-[#c8e1d0]",
-};
+const STORAGE_KEY = "study-compass-planner-v1";
 
 const kindStyles: Record<ActivityKind, string> = {
   fsrs_review: "bg-[#e8efff] text-[#3157a2]",
@@ -74,10 +66,6 @@ function formatToday() {
   }).format(new Date());
 }
 
-function minutesLabel(minutes: number) {
-  return minutes === 60 ? "1 hour" : `${minutes} minutes`;
-}
-
 function riskTone(risk: RiskState) {
   if (risk === "On track") return "bg-[#e4f3e9] text-[#276641]";
   if (risk === "Tight") return "bg-[#fff0dc] text-[#87531b]";
@@ -93,8 +81,8 @@ function AppMark() {
         <span className="absolute bottom-[7px] right-[7px] size-1.5 rounded-full bg-[#c7d3ff]" />
       </div>
       <div>
-        <p className="text-[17px] font-bold tracking-[-0.02em] text-[#1b1b20]">Studyflow</p>
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#73737f]">Exam companion</p>
+        <p className="text-[17px] font-bold tracking-[-0.02em] text-[#1b1b20]">Study Compass</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#73737f]">Offline study PWA</p>
       </div>
     </div>
   );
@@ -208,6 +196,7 @@ function Overview({
   onComplete,
   onSkip,
   onViewWeek,
+  firstName,
 }: {
   state: PlannerState;
   planner: ReturnType<typeof buildPlannerView>;
@@ -217,11 +206,11 @@ function Overview({
   onComplete: (id: string) => void;
   onSkip: (id: string) => void;
   onViewWeek: () => void;
+  firstName: string;
 }) {
   const completedToday = todayActivities.filter((activity) => activity.status === "completed").reduce((sum, activity) => sum + activity.completedMinutes, 0);
   const plannedToday = todayActivities.reduce((sum, activity) => sum + activity.plannedMinutes, 0);
   const progressToday = plannedToday ? Math.min(100, Math.round((completedToday / plannedToday) * 100)) : 0;
-  const firstName = state.exam.name === "A-level sciences" ? "Alex" : "there";
 
   return (
     <>
@@ -266,7 +255,7 @@ function Overview({
           <CardHeader className="flex flex-row items-center justify-between px-6 pb-0 pt-6">
             <div>
               <CardTitle className="text-[17px] font-bold tracking-[-0.02em]">Today at a glance</CardTitle>
-              <p className="mt-1 text-xs font-medium text-[#858691]">A plan you can actually finish</p>
+              <p className="mt-1 text-xs font-medium text-[#858691]">A plan you can actually keep</p>
             </div>
             <div className="relative flex size-[58px] items-center justify-center rounded-full" style={{ background: `conic-gradient(#4e6fc4 ${progressToday}%, #e7e9f2 0)` }}>
               <div className="flex size-[44px] items-center justify-center rounded-full bg-white text-xs font-bold text-[#3d579d]">{progressToday}%</div>
@@ -290,7 +279,7 @@ function Overview({
           <CardHeader className="flex flex-row items-center justify-between px-6 pb-2 pt-6 sm:px-7">
             <div>
               <CardTitle className="text-[18px] font-bold tracking-[-0.02em]">Today&apos;s plan</CardTitle>
-              <p className="mt-1 text-xs font-medium text-[#858691]">{todayActivities.length || 1} activities · planned in priority order</p>
+              <p className="mt-1 text-xs font-medium text-[#858691]">{todayActivities.length || 1} activities · ordered by value</p>
             </div>
             <Button type="button" variant="ghost" size="icon" className="rounded-full text-[#777985]" onClick={onViewWeek} aria-label="Open weekly plan"><MoreHorizontal className="size-5" /></Button>
           </CardHeader>
@@ -304,15 +293,15 @@ function Overview({
         <Card className="rounded-[28px] border-[#e2e3ea] bg-white py-0 shadow-[0_8px_24px_rgba(39,41,57,0.04)]">
           <CardHeader className="px-6 pb-2 pt-6 sm:px-7">
             <div className="flex items-center justify-between">
-              <div><CardTitle className="text-[18px] font-bold tracking-[-0.02em]">Why this plan?</CardTitle><p className="mt-1 text-xs font-medium text-[#858691]">Your planner is adapting</p></div>
+              <div><CardTitle className="text-[18px] font-bold tracking-[-0.02em]">Why this plan?</CardTitle><p className="mt-1 text-xs font-medium text-[#858691]">Your compass is adapting</p></div>
               <div className="flex size-9 items-center justify-center rounded-full bg-[#f0effa] text-[#72539a]"><CircleHelp className="size-[18px]" /></div>
             </div>
           </CardHeader>
           <CardContent className="px-6 pb-6 sm:px-7">
-            <div className="rounded-[18px] bg-[#f6f6fb] p-4 text-sm leading-6 text-[#5f606c]">Structured answers are your current gap in Genetics. This comes before new content because the exam is in <strong className="font-bold text-[#373844]">{planner.daysUntilExam} days</strong> and it is a prerequisite for two objectives.</div>
+            <div className="rounded-[18px] bg-[#f6f6fb] p-4 text-sm leading-6 text-[#5f606c]">Structured answers are your current gap in Onboarding. This comes before new content because the exam is in <strong className="font-bold text-[#373844]">{planner.daysUntilExam} days</strong> and the topic is a prerequisite for two further objectives.</div>
             <div className="mt-5 space-y-4">
-              <div className="flex gap-3"><div className="mt-1 size-2 shrink-0 rounded-full bg-[#4c6bc0]" /><div><p className="text-xs font-bold text-[#444550]">Memory is protected first</p><p className="mt-1 text-xs leading-5 text-[#858691]">Due reviews are forecast at 1.5 min per card and reserved before practice.</p></div></div>
-              <div className="flex gap-3"><div className="mt-1 size-2 shrink-0 rounded-full bg-[#8b68ad]" /><div><p className="text-xs font-bold text-[#444550]">Your capacity is part of the plan</p><p className="mt-1 text-xs leading-5 text-[#858691]">Recent completion suggests planning around {Math.round(state.capacity.observedCompletionRate * 100)}% of declared time.</p></div></div>
+              <div className="flex gap-3"><div className="mt-1 size-2 shrink-0 rounded-full bg-[#4c6bc0]" /><div><p className="text-xs font-bold text-[#444550]">Memory is protected first</p><p className="mt-1 text-xs leading-5 text-[#858691]">Due reviews are forecast at roughly 1.5 minutes per card and reserved before practice.</p></div></div>
+              <div className="flex gap-3"><div className="mt-1 size-2 shrink-0 rounded-full bg-[#8b68ad]" /><div><p className="text-xs font-bold text-[#444550]">Your capacity is part of the plan</p><p className="mt-1 text-xs leading-5 text-[#858691]">Recent completion suggests planning around {Math.round(state.capacity.observedCompletionRate * 100)}% of your declared time.</p></div></div>
             </div>
           </CardContent>
         </Card>
@@ -338,11 +327,11 @@ function WeekView({
         <CardContent className="overflow-x-auto p-3 sm:p-5">
           <div className="min-w-[760px]">
             <div className="grid grid-cols-7 gap-2 border-b border-[#ececf1] pb-4">{planner.days.map((day) => <div key={day.date} className="px-2 text-center"><p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#898a95]">{day.label}</p><p className="mt-1 text-lg font-bold text-[#30313a]">{day.dayNumber}</p><div className="mx-auto mt-2 h-1.5 w-12 overflow-hidden rounded-full bg-[#eceef4]"><div className="h-full rounded-full bg-[#6b83cf]" style={{ width: `${Math.min(100, (day.plannedMinutes / Math.max(day.capacityMinutes, 1)) * 100)}%` }} /></div><p className="mt-1 text-[10px] font-semibold text-[#8a8b95]">{day.plannedMinutes ? `${day.plannedMinutes}m` : "Rest"}</p></div>)}</div>
-            <div className="grid grid-cols-7 gap-2 pt-3">{planner.days.map((day) => <div key={day.date} className="min-h-[320px] rounded-[18px] bg-[#f8f8fb] p-2">{day.activities.length ? day.activities.map((activity) => <div key={activity.id} className={`mb-2 rounded-[14px] border border-transparent p-3 ${activity.status === "completed" ? "bg-[#eef5f0] opacity-75" : "bg-white shadow-[0_2px_8px_rgba(50,52,70,0.06)]"}`}><div className="flex items-start justify-between gap-1"><span className={`mt-0.5 size-2 shrink-0 rounded-full ${activity.status === "completed" ? "bg-[#55a373]" : activity.subject === "Biology" ? "bg-[#6d96d0]" : activity.subject === "Chemistry" ? "bg-[#a783c5]" : "bg-[#73a887]"}`} /><button type="button" className="ml-auto text-[#a0a1aa] opacity-0 transition-opacity hover:text-[#585965] group-hover:opacity-100" aria-label="Activity options"><MoreHorizontal className="size-4" /></button></div><p className={`mt-2 text-xs font-bold leading-4 ${activity.status === "completed" ? "text-[#7c8e82] line-through" : "text-[#42434e]"}`}>{activity.title}</p><p className="mt-2 text-[10px] font-semibold leading-4 text-[#92939d]">{activity.plannedMinutes} min</p>{activity.status !== "completed" && <div className="mt-2 flex gap-1"><button type="button" onClick={() => onComplete(activity.id)} className="rounded-full bg-[#e8f0ff] px-2 py-1 text-[10px] font-bold text-[#4562a1]">Done</button><button type="button" onClick={() => onSkip(activity.id)} className="rounded-full px-2 py-1 text-[10px] font-bold text-[#8d8e98] hover:bg-[#f0f0f5]">Skip</button></div>}</div>) : <div className="flex h-full items-center justify-center text-center text-[11px] font-semibold text-[#afb0b9]">Recovery<br />space</div>}</div>)}</div>
+            <div className="grid grid-cols-7 gap-2 pt-3">{planner.days.map((day) => <div key={day.date} className="min-h-[320px] rounded-[18px] bg-[#f8f8fb] p-2">{day.activities.length ? day.activities.map((activity) => <div key={activity.id} className={`mb-2 rounded-[14px] border border-transparent p-3 ${activity.status === "completed" ? "bg-[#eef5f0] opacity-75" : "bg-white shadow-[0_2px_8px_rgba(50,52,70,0.06)]"}`}><div className="flex items-start justify-between gap-1"><span className={`mt-0.5 size-2 shrink-0 rounded-full ${activity.status === "completed" ? "bg-[#55a373]" : activity.subject === "Product" ? "bg-[#6d96d0]" : activity.subject === "Service" ? "bg-[#a783c5]" : "bg-[#73a887]"}`} /><button type="button" className="ml-auto text-[#a0a1aa] opacity-0 transition-opacity hover:text-[#585965] group-hover:opacity-100" aria-label="Activity options"><MoreHorizontal className="size-4" /></button></div><p className={`mt-2 text-xs font-bold leading-4 ${activity.status === "completed" ? "text-[#7c8e82] line-through" : "text-[#42434e]"}`}>{activity.title}</p><p className="mt-2 text-[10px] font-semibold leading-4 text-[#92939d]">{activity.plannedMinutes} min</p>{activity.status !== "completed" && <div className="mt-2 flex gap-1"><button type="button" onClick={() => onComplete(activity.id)} className="rounded-full bg-[#e8f0ff] px-2 py-1 text-[10px] font-bold text-[#4562a1]">Done</button><button type="button" onClick={() => onSkip(activity.id)} className="rounded-full px-2 py-1 text-[10px] font-bold text-[#8d8e98] hover:bg-[#f0f0f5]">Skip</button></div>}</div>) : <div className="flex h-full items-center justify-center text-center text-[11px] font-semibold text-[#afb0b9]">Recovery<br />space</div>}</div>)}</div>
           </div>
         </CardContent>
       </Card>
-      <div className="mt-5 flex items-center gap-2 text-xs font-semibold text-[#787984]"><LockKeyhole className="size-4 text-[#7181b4]" /> The planner leaves {formatMinutes(85)} unallocated as a buffer for missed work or low-energy days.</div>
+      <div className="mt-5 flex items-center gap-2 text-xs font-semibold text-[#787984]"><LockKeyhole className="size-4 text-[#7181b4]" /> The compass leaves {formatMinutes(85)} unallocated as a buffer for missed work or low-energy days.</div>
     </>
   );
 }
@@ -350,12 +339,12 @@ function WeekView({
 function RoadmapView({ state, planner }: { state: PlannerState; planner: ReturnType<typeof buildPlannerView> }) {
   return (
     <>
-      <section><p className="text-sm font-semibold text-[#71727e]">Macro horizon <span className="mx-2 text-[#c2c3cb]">/</span> exam roadmap</p><div className="mt-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><h1 className="text-[32px] font-bold tracking-[-0.045em] text-[#1e1f24]">The bigger picture</h1><p className="mt-2 text-sm leading-6 text-[#71727e]">Know what remains, what is improving, and whether your target fits the time you have.</p></div><div className="flex items-center gap-2 rounded-full bg-[#eef2ff] px-4 py-2 text-xs font-bold text-[#4663a1]"><Flame className="size-4" /> {planner.daysUntilExam} days to go</div></div></section>
+      <section><p className="text-sm font-semibold text-[#71727e]">Macro horizon <span className="mx-2 text-[#c2c3cb]">/</span> exam roadmap</p><div className="mt-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><h1 className="text-[32px] font-bold tracking-[-0.045em] text-[#1e1f24]">The bigger picture</h1><p className="mt-2 text-sm leading-6 text-[#71727e]">See what remains, what is improving, and whether your target fits the time you have.</p></div><div className="flex items-center gap-2 rounded-full bg-[#eef2ff] px-4 py-2 text-xs font-bold text-[#4663a1]"><Flame className="size-4" /> {planner.daysUntilExam} days to go</div></div></section>
       <section className="mt-7 grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
         <Card className="rounded-[28px] border-0 bg-[#e8edff] py-0 shadow-[0_10px_28px_rgba(55,77,142,0.07)]"><CardContent className="p-6 sm:p-8"><div className="flex items-start justify-between gap-5"><div><p className="text-xs font-bold uppercase tracking-[0.12em] text-[#566da4]">{state.exam.name}</p><h2 className="mt-3 text-[26px] font-bold tracking-[-0.035em] text-[#283d78]">Target: {state.exam.target}</h2><p className="mt-2 text-sm font-medium text-[#62729b]">Exam date · {formatExamDate(state.exam.date)}</p></div><div className={`rounded-full px-3 py-1.5 text-xs font-bold ${riskTone(planner.risk)}`}>{planner.risk}</div></div><div className="mt-8"><div className="flex items-end justify-between"><span className="text-xs font-bold text-[#53658f]">Curriculum coverage</span><span className="text-2xl font-bold text-[#334c91]">{planner.coverage}%</span></div><Progress value={planner.coverage} className="mt-3 h-3 bg-[#cbd6fa]" /><p className="mt-3 text-xs font-medium leading-5 text-[#64749a]">{formatMinutes(planner.requiredMinutes)} remains against {formatMinutes(planner.realisticCapacityMinutes)} of realistic capacity.</p></div></CardContent></Card>
-        <Card className="rounded-[28px] border-[#e2e3ea] bg-white py-0 shadow-[0_8px_24px_rgba(39,41,57,0.04)]"><CardHeader className="px-6 pb-2 pt-6"><CardTitle className="text-[18px] font-bold tracking-[-0.02em]">Capacity check</CardTitle><p className="mt-1 text-xs font-medium text-[#858691]">Declared × observed completion</p></CardHeader><CardContent className="px-6 pb-6"><div className="mt-3 flex items-center gap-4"><div className="flex size-[74px] shrink-0 items-center justify-center rounded-full border-[10px] border-[#dce6ff] border-r-[#5877cf] text-lg font-bold text-[#3f5fae]">{Math.round(state.capacity.observedCompletionRate * 100)}%</div><p className="text-sm leading-6 text-[#656671]">Your last week landed at <strong className="text-[#353640]">{formatMinutes(state.capacity.lastWeekCompletedMinutes)}</strong>. The planner uses that pattern transparently, not silently.</p></div><div className="mt-5 rounded-[16px] bg-[#f7f7fa] p-3 text-xs font-semibold text-[#7c7d87]">To get comfortably on track: add 20 min on two study days or prioritise Genetics + Equilibrium.</div></CardContent></Card>
+        <Card className="rounded-[28px] border-[#e2e3ea] bg-white py-0 shadow-[0_8px_24px_rgba(39,41,57,0.04)]"><CardHeader className="px-6 pb-2 pt-6"><CardTitle className="text-[18px] font-bold tracking-[-0.02em]">Capacity check</CardTitle><p className="mt-1 text-xs font-medium text-[#858691]">Declared × observed completion</p></CardHeader><CardContent className="px-6 pb-6"><div className="mt-3 flex items-center gap-4"><div className="flex size-[74px] shrink-0 items-center justify-center rounded-full border-[10px] border-[#dce6ff] border-r-[#5877cf] text-lg font-bold text-[#3f5fae]">{Math.round(state.capacity.observedCompletionRate * 100)}%</div><p className="text-sm leading-6 text-[#656671]">Your last week landed at <strong className="text-[#353640]">{formatMinutes(state.capacity.lastWeekCompletedMinutes)}</strong>. The compass uses that pattern openly, not silently.</p></div><div className="mt-5 rounded-[16px] bg-[#f7f7fa] p-3 text-xs font-semibold text-[#7c7d87]">To get comfortably on track, add 20 minutes to two study days or prioritise Onboarding and Reporting.</div></CardContent></Card>
       </section>
-      <Card className="mt-5 rounded-[28px] border-[#e2e3ea] bg-white py-0 shadow-[0_8px_24px_rgba(39,41,57,0.04)]"><CardHeader className="flex flex-row items-end justify-between px-6 pb-2 pt-6 sm:px-7"><div><CardTitle className="text-[18px] font-bold tracking-[-0.02em]">Learning objectives</CardTitle><p className="mt-1 text-xs font-medium text-[#858691]">Acquisition, retention, and application stay separate</p></div><span className="hidden text-xs font-bold text-[#8a8b95] sm:block">4 objectives in scope</span></CardHeader><CardContent className="px-6 pb-5 sm:px-7">{state.topics.map((topic) => <div key={topic.id} className="grid gap-3 border-b border-[#eeeff3] py-4 last:border-0 md:grid-cols-[minmax(190px,1.3fr)_90px_90px_90px_minmax(160px,1fr)] md:items-center"><div><div className="flex items-center gap-2"><span className={`size-2 rounded-full ${topic.subject === "Biology" ? "bg-[#6d96d0]" : "bg-[#a783c5]"}`} /><p className="text-sm font-bold text-[#3a3b45]">{topic.name}</p></div><p className="mt-1 pl-4 text-xs font-medium text-[#94959e]">{topic.unit}</p></div><div><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9a9ba4]">Learned</p><p className="mt-1 text-sm font-bold text-[#454650]">{Math.round(topic.acquisition * 100)}%</p></div><div><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9a9ba4]">Recall</p><p className="mt-1 text-sm font-bold text-[#454650]">{Math.round(topic.retention * 100)}%</p></div><div><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9a9ba4]">Apply</p><p className="mt-1 text-sm font-bold text-[#454650]">{Math.round(topic.application * 100)}%</p></div><div><div className="flex items-center justify-between text-[10px] font-bold text-[#888993]"><span>{topic.errorLabel}</span><span>{topic.dueCards} due</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#edf0f5]"><div className={`h-full rounded-full ${topic.subject === "Biology" ? "bg-[#6d96d0]" : "bg-[#a783c5]"}`} style={{ width: `${Math.round(topic.application * 100)}%` }} /></div></div></div>)}</CardContent></Card>
+      <Card className="mt-5 rounded-[28px] border-[#e2e3ea] bg-white py-0 shadow-[0_8px_24px_rgba(39,41,57,0.04)]"><CardHeader className="flex flex-row items-end justify-between px-6 pb-2 pt-6 sm:px-7"><div><CardTitle className="text-[18px] font-bold tracking-[-0.02em]">Learning objectives</CardTitle><p className="mt-1 text-xs font-medium text-[#858691]">Learning, recall, and application are tracked separately</p></div><span className="hidden text-xs font-bold text-[#8a8b95] sm:block">4 objectives in scope</span></CardHeader><CardContent className="px-6 pb-5 sm:px-7">{state.topics.map((topic) => <div key={topic.id} className="grid gap-3 border-b border-[#eeeff3] py-4 last:border-0 md:grid-cols-[minmax(190px,1.3fr)_90px_90px_90px_minmax(160px,1fr)] md:items-center"><div><div className="flex items-center gap-2"><span className={`size-2 rounded-full ${topic.subject === "Product" ? "bg-[#6d96d0]" : "bg-[#a783c5]"}`} /><p className="text-sm font-bold text-[#3a3b45]">{topic.name}</p></div><p className="mt-1 pl-4 text-xs font-medium text-[#94959e]">{topic.unit}</p></div><div><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9a9ba4]">Learned</p><p className="mt-1 text-sm font-bold text-[#454650]">{Math.round(topic.acquisition * 100)}%</p></div><div><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9a9ba4]">Recall</p><p className="mt-1 text-sm font-bold text-[#454650]">{Math.round(topic.retention * 100)}%</p></div><div><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9a9ba4]">Apply</p><p className="mt-1 text-sm font-bold text-[#454650]">{Math.round(topic.application * 100)}%</p></div><div><div className="flex items-center justify-between text-[10px] font-bold text-[#888993]"><span>{topic.errorLabel}</span><span>{topic.dueCards} due</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#edf0f5]"><div className={`h-full rounded-full ${topic.subject === "Product" ? "bg-[#6d96d0]" : "bg-[#a783c5]"}`} style={{ width: `${Math.round(topic.application * 100)}%` }} /></div></div></div>)}</CardContent></Card>
     </>
   );
 }
@@ -409,13 +398,13 @@ export default function Dashboard() {
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-[232px] flex-col border-r border-[#e7e7ee] bg-[#fbfbfd] px-4 py-6 lg:flex">
         <div className="px-3"><AppMark /></div>
         <div className="mt-12"><p className="px-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[#9b9ca5]">Your plan</p><nav className="mt-3 space-y-1"><NavItem active={view === "overview"} icon={LayoutDashboard} label="Overview" onClick={() => setView("overview")} /><NavItem active={view === "week"} icon={CalendarDays} label="Weekly plan" onClick={() => setView("week")} /><NavItem active={view === "roadmap"} icon={TrendingUp} label="Roadmap" onClick={() => setView("roadmap")} /></nav></div>
-        <div className="mt-auto space-y-1"><button type="button" className="flex w-full items-center gap-3 rounded-full px-4 py-3 text-sm font-semibold text-[#666672] hover:bg-[#f1f2f8]"><Settings2 className="size-[19px] text-[#7b7c88]" /> Preferences</button><div className="mt-4 flex items-center gap-3 rounded-[18px] bg-[#f2f3f8] px-3 py-3"><div className="flex size-9 items-center justify-center rounded-full bg-[#d7e1ff] text-xs font-bold text-[#3557a5]">{(user?.name ?? "A").slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-[#44454f]">{user?.name ?? "Alex Morgan"}</p><p className="mt-0.5 text-[10px] font-medium text-[#898a94]">Personal plan</p></div><button type="button" onClick={handleSignOut} className="text-[#8c8d96] hover:text-[#474852]" aria-label="Sign out"><LogOut className="size-4" /></button></div></div>
+        <div className="mt-auto space-y-1"><button type="button" className="flex w-full items-center gap-3 rounded-full px-4 py-3 text-sm font-semibold text-[#666672] hover:bg-[#f1f2f8]"><Settings2 className="size-[19px] text-[#7b7c88]" /> Preferences</button><div className="mt-4 flex items-center gap-3 rounded-[18px] bg-[#f2f3f8] px-3 py-3"><div className="flex size-9 items-center justify-center rounded-full bg-[#d7e1ff] text-xs font-bold text-[#3557a5]">{(user?.name ?? "A").slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-[#44454f]">{user?.name ?? "Your workspace"}</p><p className="mt-0.5 text-[10px] font-medium text-[#898a94]">Personal plan</p></div><button type="button" onClick={handleSignOut} className="text-[#8c8d96] hover:text-[#474852]" aria-label="Sign out"><LogOut className="size-4" /></button></div></div>
       </aside>
 
       <main className="lg:pl-[232px]">
         <header className="sticky top-0 z-10 flex h-[72px] items-center justify-between border-b border-[#e7e7ee] bg-[#f8f8fc]/90 px-5 backdrop-blur-md sm:px-8 lg:px-10"><div className="lg:hidden"><AppMark /></div><div className="hidden items-center gap-2 text-xs font-bold text-[#777883] lg:flex"><GraduationCap className="size-4 text-[#5b70b2]" /> {state.exam.name} <ChevronRight className="size-3" /> <span className="text-[#3c3d47]">Personal workspace</span></div><div className="flex items-center gap-3"><div className="hidden items-center gap-2 rounded-full border border-[#dfe1eb] bg-white/70 px-3 py-2 text-[11px] font-bold text-[#777883] sm:flex"><CloudOff className="size-3.5 text-[#5871ae]" /> Offline-ready</div><button type="button" className="flex size-9 items-center justify-center rounded-full bg-[#d7e1ff] text-xs font-bold text-[#3557a5] lg:hidden" onClick={handleSignOut}>{(user?.name ?? "A").slice(0, 1).toUpperCase()}</button></div></header>
         <div className="flex gap-2 overflow-x-auto border-b border-[#e7e7ee] bg-[#f8f8fc] px-5 py-3 lg:hidden"><button type="button" onClick={() => setView("overview")} className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold ${view === "overview" ? "bg-[#e1e8ff] text-[#244a9c]" : "text-[#777883]"}`}>Overview</button><button type="button" onClick={() => setView("week")} className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold ${view === "week" ? "bg-[#e1e8ff] text-[#244a9c]" : "text-[#777883]"}`}>Weekly plan</button><button type="button" onClick={() => setView("roadmap")} className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold ${view === "roadmap" ? "bg-[#e1e8ff] text-[#244a9c]" : "text-[#777883]"}`}>Roadmap</button></div>
-        <div className="mx-auto max-w-[1360px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">{view === "overview" && <Overview state={state} planner={planner} nextActivity={nextActivity} todayActivities={todayActivities} onStart={(activity) => { updateActivity(activity.id, "in_progress"); toast("Focus session ready", { description: `${activity.plannedMinutes} minutes of ${activity.title}.` }); }} onComplete={(id) => updateActivity(id, "completed")} onSkip={(id) => updateActivity(id, "skipped")} onViewWeek={() => setView("week")} />}{view === "week" && <WeekView planner={planner} onComplete={(id) => updateActivity(id, "completed")} onSkip={(id) => updateActivity(id, "skipped")} />}{view === "roadmap" && <RoadmapView state={state} planner={planner} />}</div>
+        <div className="mx-auto max-w-[1360px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">{view === "overview" && <Overview state={state} planner={planner} nextActivity={nextActivity} todayActivities={todayActivities} firstName={(user?.name?.split(" ")[0]) ?? "there"} onStart={(activity) => { updateActivity(activity.id, "in_progress"); toast("Focus session ready", { description: `${activity.plannedMinutes} minutes of ${activity.title}.` }); }} onComplete={(id) => updateActivity(id, "completed")} onSkip={(id) => updateActivity(id, "skipped")} onViewWeek={() => setView("week")} />}{view === "week" && <WeekView planner={planner} onComplete={(id) => updateActivity(id, "completed")} onSkip={(id) => updateActivity(id, "skipped")} />}{view === "roadmap" && <RoadmapView state={state} planner={planner} />}</div>
       </main>
     </div>
   );
