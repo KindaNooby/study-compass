@@ -27,7 +27,7 @@ import type {
   ReviewGrade,
   SessionStatus,
 } from "@/lib/planner";
-import { CheckCircle2, Loader2, Play, RotateCcw } from "lucide-react";
+import { ArrowRight, CheckCircle2, Loader2, Play, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -35,12 +35,13 @@ const SESSION_STATUSES: SessionStatus[] = ["completed", "partial", "skipped", "m
 
 // --- Review cards ---
 
-function ReviewRunner() {
+function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
   const { data: cards, loading } = useCards();
   const [queue, setQueue] = useState<FsrsCard[] | null>(null);
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
+  const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
   const due = useMemo(
@@ -59,6 +60,7 @@ function ReviewRunner() {
     setIndex(0);
     setRevealed(false);
     setStartedAt(Date.now());
+    setSessionStartedAt(Date.now());
   };
 
   const reset = () => {
@@ -66,6 +68,34 @@ function ReviewRunner() {
     setIndex(0);
     setRevealed(false);
     setStartedAt(0);
+    setSessionStartedAt(null);
+  };
+
+  /**
+   * Closes the study loop: a review run is also a study session, so it writes
+   * an append-only SessionLog that the observed-capacity model can read.
+   */
+  const finishSession = async (status: SessionStatus, reviewedCount: number) => {
+    if (sessionStartedAt === null || !queue || reviewedCount === 0) return;
+    const endedAt = Date.now();
+    const actualMinutes = Math.max(1, Math.round((endedAt - sessionStartedAt) / 60000));
+    try {
+      await addSessionLog({
+        date: todayKey(),
+        kind: "fsrs_review",
+        objectiveIds: Array.from(
+          new Set(queue.slice(0, reviewedCount).map((card) => card.objectiveId)),
+        ),
+        plannedMinutes: 0,
+        actualMinutes,
+        status,
+        startedAt: new Date(sessionStartedAt).toISOString(),
+        endedAt: new Date(endedAt).toISOString(),
+        note: status === "partial" ? "Ended early" : undefined,
+      });
+    } catch {
+      toast.error("Could not save the review session.");
+    }
   };
 
   const grade = async (value: ReviewGrade) => {
@@ -73,9 +103,31 @@ function ReviewRunner() {
     setBusy(true);
     try {
       await reviewCard(current, value, Date.now() - startedAt);
+      const nextIndex = index + 1;
       setRevealed(false);
       setStartedAt(Date.now());
-      setIndex((i) => i + 1);
+      setIndex(nextIndex);
+      if (queue && nextIndex >= queue.length) {
+        await finishSession("completed", nextIndex);
+        toast.success("Review session saved");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const endEarly = async () => {
+    if (busy || !queue) return;
+    setBusy(true);
+    try {
+      if (index > 0) {
+        await finishSession("partial", index);
+        setIndex(queue.length);
+        setRevealed(false);
+        toast.success("Partial session saved");
+      } else {
+        reset();
+      }
     } finally {
       setBusy(false);
     }
@@ -106,9 +158,16 @@ function ReviewRunner() {
         <CheckCircle2 className="mx-auto size-8 text-[#3f9a63]" />
         <p className="mt-3 text-sm font-bold text-[#276641]">Session complete.</p>
         <p className="mt-1 text-xs text-[#5a7a66]">{queue?.length ?? 0} card{(queue?.length ?? 0) === 1 ? "" : "s"} reviewed.</p>
-        <Button type="button" variant="outline" className="mt-4 rounded-full" onClick={reset}>
-          <RotateCcw className="size-4" /> Done
-        </Button>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          <Button type="button" variant="outline" className="rounded-full" onClick={reset}>
+            <RotateCcw className="size-4" /> Review again
+          </Button>
+          {onViewMeasure && (
+            <Button type="button" variant="outline" className="rounded-full" onClick={onViewMeasure}>
+              View measurement <ArrowRight className="size-4" />
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
@@ -135,9 +194,19 @@ function ReviewRunner() {
 
   return (
     <div className="grid gap-4">
-      <div className="flex items-center justify-between text-xs font-semibold text-[#8a8b95]">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-[#8a8b95]">
         <span>{index + 1} of {queue?.length}</span>
-        <span>Due · {cards.filter((card) => !card.suspended).length} active card{cards.filter((card) => !card.suspended).length === 1 ? "" : "s"}</span>
+        <div className="flex items-center gap-3">
+          <span>Due · {cards.filter((card) => !card.suspended).length} active card{cards.filter((card) => !card.suspended).length === 1 ? "" : "s"}</span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={endEarly}
+            className="cursor-pointer rounded-full border border-[#e3e4eb] px-3 py-1 text-[11px] font-bold text-[#8a8b95] hover:bg-[#f4f5fa] hover:text-[#555764]"
+          >
+            End session
+          </button>
+        </div>
       </div>
       <div className="rounded-[20px] border border-[#e3e4eb] bg-white p-6 shadow-[0_7px_20px_rgba(39,41,57,0.03)]">
         <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#9b9ca5]">Question</p>
@@ -536,7 +605,7 @@ function SessionLogger() {
   );
 }
 
-export function Study() {
+export function Study({ onNavigate }: { onNavigate?: (view: "measure") => void }) {
   const { data: objectives } = useObjectives();
 
   return (
@@ -573,7 +642,7 @@ export function Study() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="px-6 pb-6">
-                <ReviewRunner />
+                <ReviewRunner onViewMeasure={onNavigate ? () => onNavigate("measure") : undefined} />
               </CardContent>
             </Card>
           </TabsContent>

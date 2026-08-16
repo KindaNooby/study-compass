@@ -165,7 +165,7 @@ export default function Dashboard() {
 
         <div className="mx-auto max-w-[1360px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
           {view === "overview" && <Overview onNavigate={setView} />}
-          {view === "study" && <Study />}
+          {view === "study" && <Study onNavigate={setView} />}
           {view === "measure" && <Measure />}
           {view === "curriculum" && <CurriculumBrowser />}
           {view === "setup" && <Setup />}

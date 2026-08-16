@@ -52,7 +52,10 @@ db.version(1).stores({
   activities: "id, date, examGoalId, [date+status]",
 });
 
-// v2: measurement content and append-only event logs (phase 2).
+// v2: measurement content and the append-only event log (phase 2).
+// Study activity is event-sourced: reviewLogs, practiceAttempts, and sessionLogs
+// hold immutable facts. `cards` is the projected FSRS state, written atomically
+// alongside its `card.reviewed` event by repository.reviewCard.
 db.version(2).stores({
   cards: "id, objectiveId, due",
   questions: "id, objectiveId",
