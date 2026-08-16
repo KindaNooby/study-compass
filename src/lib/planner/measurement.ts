@@ -239,7 +239,10 @@ export type ObservedCapacity = {
   totalSessions: number;
   completedSessions: number;
   completionRate: number | null;
+  /** Mean actual minutes across sessions that actually happened (actual > 0). */
   averageSessionMinutes: number | null;
+  /** Mean total completed minutes across distinct study days. */
+  averageCompletedMinutesPerDay: number | null;
   averagePlannedMinutes: number | null;
   averageTimePerMcqSeconds: number | null;
   averageTimePerStructuredSeconds: number | null;
@@ -265,7 +268,9 @@ export function observeCapacity(input: {
 }): ObservedCapacity {
   const { sessionLogs, attempts } = input;
 
-  const completed = sessionLogs.filter((log) => log.status === "completed").length;
+  const completedLogs = sessionLogs.filter((log) => log.status === "completed");
+  const attendedLogs = sessionLogs.filter((log) => log.actualMinutes > 0);
+
   const byWeekday: Record<number, WeekdayCapacity> = {};
   for (let day = 0; day < 7; day++) {
     byWeekday[day] = { sessions: 0, completed: 0, rate: null };
@@ -281,6 +286,14 @@ export function observeCapacity(input: {
     bucket.rate = bucket.sessions === 0 ? null : bucket.completed / bucket.sessions;
   }
 
+  const completedMinutesByDay = new Map<string, number>();
+  for (const log of completedLogs) {
+    completedMinutesByDay.set(
+      log.date,
+      (completedMinutesByDay.get(log.date) ?? 0) + log.actualMinutes,
+    );
+  }
+
   const mcqSeconds = attempts
     .filter((attempt) => attempt.kind === "mcq")
     .map((attempt) => attempt.timeSeconds);
@@ -290,9 +303,10 @@ export function observeCapacity(input: {
 
   return {
     totalSessions: sessionLogs.length,
-    completedSessions: completed,
-    completionRate: sessionLogs.length === 0 ? null : completed / sessionLogs.length,
-    averageSessionMinutes: mean(sessionLogs.map((log) => log.actualMinutes)),
+    completedSessions: completedLogs.length,
+    completionRate: sessionLogs.length === 0 ? null : completedLogs.length / sessionLogs.length,
+    averageSessionMinutes: mean(attendedLogs.map((log) => log.actualMinutes)),
+    averageCompletedMinutesPerDay: mean(Array.from(completedMinutesByDay.values())),
     averagePlannedMinutes: mean(sessionLogs.map((log) => log.plannedMinutes)),
     averageTimePerMcqSeconds: mean(mcqSeconds),
     averageTimePerStructuredSeconds: mean(structuredSeconds),

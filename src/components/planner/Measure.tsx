@@ -202,11 +202,16 @@ export function Measure() {
               </p>
             ) : (
               <div className="grid gap-4">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#9b9ca5]">Avg session</p>
                     <p className="mt-1 text-sm font-bold text-[#3a3b45]">{num(capacity.averageSessionMinutes, " min")}</p>
-                    <p className="text-[11px] text-[#8a8b95]">planned {num(capacity.averagePlannedMinutes, " min")}</p>
+                    <p className="text-[11px] text-[#8a8b95]">attended sessions</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#9b9ca5]">Per study day</p>
+                    <p className="mt-1 text-sm font-bold text-[#3a3b45]">{num(capacity.averageCompletedMinutesPerDay, " min")}</p>
+                    <p className="text-[11px] text-[#8a8b95]">completed only</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#9b9ca5]">Time per MCQ</p>

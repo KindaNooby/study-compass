@@ -179,7 +179,8 @@ describe("observeCapacity", () => {
     expect(capacity.totalSessions).toBe(2);
     expect(capacity.completedSessions).toBe(1);
     expect(capacity.completionRate).toBe(0.5);
-    expect(capacity.averageSessionMinutes).toBeCloseTo(22.5, 5);
+    expect(capacity.averageSessionMinutes).toBeCloseTo(45, 5);
+    expect(capacity.averageCompletedMinutesPerDay).toBeCloseTo(45, 5);
     expect(capacity.averageTimePerMcqSeconds).toBeCloseTo(90, 5);
     expect(capacity.averageTimePerStructuredSeconds).toBeCloseTo(300, 5);
     expect(capacity.missedCount).toBe(1);

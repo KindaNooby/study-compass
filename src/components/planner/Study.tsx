@@ -42,6 +42,7 @@ function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
   const [revealed, setRevealed] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
+  const [reviewedCount, setReviewedCount] = useState(0);
   const [busy, setBusy] = useState(false);
 
   const due = useMemo(
@@ -61,6 +62,7 @@ function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
     setRevealed(false);
     setStartedAt(Date.now());
     setSessionStartedAt(Date.now());
+    setReviewedCount(0);
   };
 
   const reset = () => {
@@ -69,6 +71,7 @@ function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
     setRevealed(false);
     setStartedAt(0);
     setSessionStartedAt(null);
+    setReviewedCount(0);
   };
 
   /**
@@ -107,6 +110,7 @@ function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
       setRevealed(false);
       setStartedAt(Date.now());
       setIndex(nextIndex);
+      setReviewedCount(nextIndex);
       if (queue && nextIndex >= queue.length) {
         await finishSession("completed", nextIndex);
         toast.success("Review session saved");
@@ -122,6 +126,7 @@ function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
     try {
       if (index > 0) {
         await finishSession("partial", index);
+        setReviewedCount(index);
         setIndex(queue.length);
         setRevealed(false);
         toast.success("Partial session saved");
@@ -156,8 +161,12 @@ function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
     return (
       <div className="rounded-[16px] border border-[#e3e4eb] bg-[#f4faf6] p-8 text-center">
         <CheckCircle2 className="mx-auto size-8 text-[#3f9a63]" />
-        <p className="mt-3 text-sm font-bold text-[#276641]">Session complete.</p>
-        <p className="mt-1 text-xs text-[#5a7a66]">{queue?.length ?? 0} card{(queue?.length ?? 0) === 1 ? "" : "s"} reviewed.</p>
+        <p className="mt-3 text-sm font-bold text-[#276641]">
+          {queue && reviewedCount < queue.length ? "Session ended early." : "Session complete."}
+        </p>
+        <p className="mt-1 text-xs text-[#5a7a66]">
+          {reviewedCount} card{reviewedCount === 1 ? "" : "s"} reviewed.
+        </p>
         <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
           <Button type="button" variant="outline" className="rounded-full" onClick={reset}>
             <RotateCcw className="size-4" /> Review again
@@ -258,7 +267,7 @@ function PracticeLogger() {
   const [questionId, setQuestionId] = useState("");
   const [kind, setKind] = useState<QuestionType>("mcq");
   const [chosenOptionId, setChosenOptionId] = useState<string | null>(null);
-  const [correct, setCorrect] = useState(true);
+  const [correct, setCorrect] = useState(false);
   const [score, setScore] = useState("");
   const [maxScore, setMaxScore] = useState("1");
   const [timeSeconds, setTimeSeconds] = useState("60");
@@ -278,7 +287,7 @@ function PracticeLogger() {
   const reset = () => {
     setQuestionId("");
     setChosenOptionId(null);
-    setCorrect(true);
+    setCorrect(false);
     setScore("");
     setMaxScore("1");
     setTimeSeconds("60");
@@ -511,6 +520,7 @@ function SessionLogger() {
 
   const submit = async () => {
     try {
+      const attended = status === "completed" || status === "partial";
       await addSessionLog({
         date,
         kind: kind || undefined,
@@ -518,7 +528,7 @@ function SessionLogger() {
         plannedMinutes: Number(plannedMinutes) || 0,
         actualMinutes: Number(actualMinutes) || 0,
         status,
-        startedAt: new Date().toISOString(),
+        startedAt: attended ? new Date().toISOString() : undefined,
         note: note.trim() || undefined,
       });
       toast.success("Session logged");
@@ -606,8 +616,6 @@ function SessionLogger() {
 }
 
 export function Study({ onNavigate }: { onNavigate?: (view: "measure") => void }) {
-  const { data: objectives } = useObjectives();
-
   return (
     <>
       <section>
