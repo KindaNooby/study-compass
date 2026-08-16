@@ -3,4 +3,6 @@ export * from "./schemas";
 export * from "./db";
 export * from "./repository";
 export * from "./selectors";
+export * from "./fsrs";
+export * from "./measurement";
 export * from "./store";

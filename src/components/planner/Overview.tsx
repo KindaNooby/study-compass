@@ -100,13 +100,13 @@ export function Overview({ onNavigate }: { onNavigate: (destination: Destination
   return (
     <>
       <section>
-        <p className="text-sm font-semibold text-[#71727e]">Phase 1 · Foundation</p>
+        <p className="text-sm font-semibold text-[#71727e]">Workspace</p>
         <h1 className="mt-2 text-[32px] font-bold tracking-[-0.045em] text-[#1e1f24]">
-          Set up your study foundations
+          Your study workspace
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-[#71727e]">
-          Before the planner can think, it needs your curriculum, your exam goals, and your real
-          availability. Everything lives on this device.
+          Build the curriculum, set your goals, then record real study sessions. Measurement turns
+          those sessions into an honest picture of what you can actually cover.
         </p>
       </section>
 
@@ -163,10 +163,10 @@ export function Overview({ onNavigate }: { onNavigate: (destination: Destination
             What comes next
           </p>
           <div className="mt-4 grid gap-3 text-sm text-[#5a6a94] sm:grid-cols-2">
-            <p><strong className="text-[#334a85]">Phase 2 · Measurement</strong> — FSRS card state, review logs, time tracking, and per-topic performance.</p>
             <p><strong className="text-[#334a85]">Phase 3 · Planner</strong> — review forecast, priority, capacity, weekly allocation, and feasibility.</p>
             <p><strong className="text-[#334a85]">Phase 4 · Adaptation</strong> — missed sessions, rolling replanning, and weekly analysis.</p>
             <p><strong className="text-[#334a85]">Phase 5 · Experience</strong> — the calendar, drag-and-drop, and explanations.</p>
+            <p><strong className="text-[#334a85]">Phase 6 · Enhancements</strong> — cloud sync, syllabus ingestion, and error-pattern analysis.</p>
           </div>
         </CardContent>
       </Card>

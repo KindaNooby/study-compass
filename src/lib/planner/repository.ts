@@ -1,8 +1,14 @@
+import { applyReview, emptyCardState } from "./fsrs";
 import { db, uid } from "./db";
 import {
   availabilitySchema,
   examGoalSchema,
+  fsrsCardSchema,
   learningObjectiveSchema,
+  practiceAttemptSchema,
+  questionSchema,
+  reviewLogSchema,
+  sessionLogSchema,
   studyActivitySchema,
   subjectSchema,
   topicSchema,
@@ -11,7 +17,13 @@ import {
 import type {
   Availability,
   ExamGoal,
+  FsrsCard,
   LearningObjective,
+  PracticeAttempt,
+  Question,
+  ReviewGrade,
+  ReviewLog,
+  SessionLog,
   StudyActivity,
   Subject,
   Topic,
@@ -74,6 +86,17 @@ async function prunePrerequisites(objective: LearningObjective): Promise<Learnin
   };
 }
 
+/** Removes cards, questions, and their logs for a set of removed objectives. */
+async function deleteMeasurementForObjectives(objectiveIds: string[]): Promise<void> {
+  if (objectiveIds.length === 0) return;
+  await Promise.all([
+    db.cards.where("objectiveId").anyOf(objectiveIds).delete(),
+    db.questions.where("objectiveId").anyOf(objectiveIds).delete(),
+    db.reviewLogs.where("objectiveId").anyOf(objectiveIds).delete(),
+    db.practiceAttempts.where("objectiveId").anyOf(objectiveIds).delete(),
+  ]);
+}
+
 async function removePrerequisiteReferences(objectiveIds: string[]): Promise<void> {
   if (objectiveIds.length === 0) return;
   const removed = new Set(objectiveIds);
@@ -125,7 +148,17 @@ async function cleanGoalsForRemoved(input: {
 export async function deleteSubject(subjectId: string): Promise<void> {
   await db.transaction(
     "rw",
-    [db.subjects, db.units, db.topics, db.objectives, db.examGoals],
+    [
+      db.subjects,
+      db.units,
+      db.topics,
+      db.objectives,
+      db.examGoals,
+      db.cards,
+      db.questions,
+      db.reviewLogs,
+      db.practiceAttempts,
+    ],
     async () => {
       const topicIds = (await db.topics.where("subjectId").equals(subjectId).toArray()).map(
         (topic) => topic.id,
@@ -139,6 +172,7 @@ export async function deleteSubject(subjectId: string): Promise<void> {
       await db.units.where("subjectId").equals(subjectId).delete();
       await db.subjects.delete(subjectId);
 
+      await deleteMeasurementForObjectives(objectiveIds);
       await removePrerequisiteReferences(objectiveIds);
       await cleanGoalsForRemoved({ subjectId, topicIds });
     },
@@ -146,42 +180,74 @@ export async function deleteSubject(subjectId: string): Promise<void> {
 }
 
 export async function deleteUnit(unitId: string): Promise<void> {
-  await db.transaction("rw", [db.units, db.topics, db.objectives, db.examGoals], async () => {
-    const topics = await db.topics.where("unitId").equals(unitId).toArray();
-    const topicIds = topics.map((topic) => topic.id);
-    const objectiveIds = topicIds.length
-      ? (await db.objectives.where("topicId").anyOf(topicIds).toArray()).map(
-          (objective) => objective.id,
-        )
-      : [];
+  await db.transaction(
+    "rw",
+    [
+      db.units,
+      db.topics,
+      db.objectives,
+      db.examGoals,
+      db.cards,
+      db.questions,
+      db.reviewLogs,
+      db.practiceAttempts,
+    ],
+    async () => {
+      const topics = await db.topics.where("unitId").equals(unitId).toArray();
+      const topicIds = topics.map((topic) => topic.id);
+      const objectiveIds = topicIds.length
+        ? (await db.objectives.where("topicId").anyOf(topicIds).toArray()).map(
+            (objective) => objective.id,
+          )
+        : [];
 
-    if (topicIds.length) await db.objectives.where("topicId").anyOf(topicIds).delete();
-    await db.topics.where("unitId").equals(unitId).delete();
-    await db.units.delete(unitId);
+      if (topicIds.length) await db.objectives.where("topicId").anyOf(topicIds).delete();
+      await db.topics.where("unitId").equals(unitId).delete();
+      await db.units.delete(unitId);
 
-    await removePrerequisiteReferences(objectiveIds);
-    await cleanGoalsForRemoved({ topicIds });
-  });
+      await deleteMeasurementForObjectives(objectiveIds);
+      await removePrerequisiteReferences(objectiveIds);
+      await cleanGoalsForRemoved({ topicIds });
+    },
+  );
 }
 
 export async function deleteTopic(topicId: string): Promise<void> {
-  await db.transaction("rw", [db.topics, db.objectives, db.examGoals], async () => {
-    const objectiveIds = (await db.objectives.where("topicId").equals(topicId).toArray()).map(
-      (objective) => objective.id,
-    );
-    await db.objectives.where("topicId").equals(topicId).delete();
-    await db.topics.delete(topicId);
+  await db.transaction(
+    "rw",
+    [
+      db.topics,
+      db.objectives,
+      db.examGoals,
+      db.cards,
+      db.questions,
+      db.reviewLogs,
+      db.practiceAttempts,
+    ],
+    async () => {
+      const objectiveIds = (await db.objectives.where("topicId").equals(topicId).toArray()).map(
+        (objective) => objective.id,
+      );
+      await db.objectives.where("topicId").equals(topicId).delete();
+      await db.topics.delete(topicId);
 
-    await removePrerequisiteReferences(objectiveIds);
-    await cleanGoalsForRemoved({ topicIds: [topicId] });
-  });
+      await deleteMeasurementForObjectives(objectiveIds);
+      await removePrerequisiteReferences(objectiveIds);
+      await cleanGoalsForRemoved({ topicIds: [topicId] });
+    },
+  );
 }
 
 export async function deleteObjective(objectiveId: string): Promise<void> {
-  await db.transaction("rw", [db.objectives], async () => {
-    await db.objectives.delete(objectiveId);
-    await removePrerequisiteReferences([objectiveId]);
-  });
+  await db.transaction(
+    "rw",
+    [db.objectives, db.cards, db.questions, db.reviewLogs, db.practiceAttempts],
+    async () => {
+      await db.objectives.delete(objectiveId);
+      await deleteMeasurementForObjectives([objectiveId]);
+      await removePrerequisiteReferences([objectiveId]);
+    },
+  );
 }
 
 // --- Exam goals ---
@@ -216,4 +282,89 @@ export async function addActivity(input: OmitId<StudyActivity>): Promise<StudyAc
 
 export async function activitiesForDate(date: string): Promise<StudyActivity[]> {
   return db.activities.where("date").equals(date).toArray();
+}
+
+// --- Cards (phase 2) ---
+
+export async function createCard(objectiveId: string, front: string, back: string): Promise<FsrsCard> {
+  const now = new Date();
+  const card = fsrsCardSchema.parse({
+    id: uid(),
+    objectiveId,
+    front,
+    back,
+    ...emptyCardState(now),
+    suspended: false,
+    createdAt: now.toISOString(),
+  });
+  await db.cards.add(card);
+  return card;
+}
+
+export async function deleteCard(cardId: string): Promise<void> {
+  await db.transaction("rw", [db.cards, db.reviewLogs], async () => {
+    await db.cards.delete(cardId);
+    await db.reviewLogs.where("cardId").equals(cardId).delete();
+  });
+}
+
+/** Grades a card, persists the new FSRS state, and appends the review log atomically. */
+export async function reviewCard(
+  card: FsrsCard,
+  grade: ReviewGrade,
+  elapsedMs: number,
+  now = new Date(),
+): Promise<ReviewLog> {
+  const result = applyReview(card, grade, now);
+  const log = reviewLogSchema.parse({
+    id: uid(),
+    cardId: card.id,
+    objectiveId: card.objectiveId,
+    grade,
+    state: result.log.state,
+    due: result.log.due,
+    stability: result.log.stability,
+    difficulty: result.log.difficulty,
+    scheduledDays: result.log.scheduledDays,
+    elapsedMs,
+    reviewedAt: now.toISOString(),
+  });
+  await db.transaction("rw", [db.cards, db.reviewLogs], async () => {
+    await db.cards.put(result.card);
+    await db.reviewLogs.add(log);
+  });
+  return log;
+}
+
+// --- Questions (phase 2) ---
+
+export async function createQuestion(input: Omit<Question, "id" | "createdAt">): Promise<Question> {
+  const question = questionSchema.parse({
+    ...input,
+    id: uid(),
+    createdAt: new Date().toISOString(),
+  });
+  await db.questions.add(question);
+  return question;
+}
+
+export async function deleteQuestion(questionId: string): Promise<void> {
+  await db.transaction("rw", [db.questions, db.practiceAttempts], async () => {
+    await db.questions.delete(questionId);
+    await db.practiceAttempts.where("questionId").equals(questionId).delete();
+  });
+}
+
+// --- Event logs (phase 2) ---
+
+export async function addPracticeAttempt(input: OmitId<PracticeAttempt>): Promise<PracticeAttempt> {
+  const attempt = practiceAttemptSchema.parse({ ...input, id: uid() });
+  await db.practiceAttempts.add(attempt);
+  return attempt;
+}
+
+export async function addSessionLog(input: OmitId<SessionLog>): Promise<SessionLog> {
+  const log = sessionLogSchema.parse({ ...input, id: uid() });
+  await db.sessionLogs.add(log);
+  return log;
 }

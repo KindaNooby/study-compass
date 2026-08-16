@@ -3,7 +3,12 @@ import Dexie, { type EntityTable } from "dexie";
 import type {
   Availability,
   ExamGoal,
+  FsrsCard,
   LearningObjective,
+  PracticeAttempt,
+  Question,
+  ReviewLog,
+  SessionLog,
   StudyActivity,
   Subject,
   Topic,
@@ -15,7 +20,7 @@ export type MetaDoc = {
   schemaVersion: number;
 };
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const AVAILABILITY_ID = "main";
 export const META_ID = "main";
 
@@ -28,9 +33,15 @@ export const db = new Dexie("study-compass") as Dexie & {
   examGoals: EntityTable<ExamGoal, "id">;
   availability: EntityTable<Availability, "id">;
   activities: EntityTable<StudyActivity, "id">;
+  cards: EntityTable<FsrsCard, "id">;
+  questions: EntityTable<Question, "id">;
+  reviewLogs: EntityTable<ReviewLog, "id">;
+  practiceAttempts: EntityTable<PracticeAttempt, "id">;
+  sessionLogs: EntityTable<SessionLog, "id">;
 };
 
-db.version(SCHEMA_VERSION).stores({
+// v1: curriculum, goals, availability, activities (phase 1 foundation).
+db.version(1).stores({
   meta: "id",
   subjects: "id",
   units: "id, subjectId",
@@ -39,6 +50,15 @@ db.version(SCHEMA_VERSION).stores({
   examGoals: "id",
   availability: "id",
   activities: "id, date, examGoalId, [date+status]",
+});
+
+// v2: measurement content and append-only event logs (phase 2).
+db.version(2).stores({
+  cards: "id, objectiveId, due",
+  questions: "id, objectiveId",
+  reviewLogs: "id, cardId, objectiveId, reviewedAt",
+  practiceAttempts: "id, questionId, objectiveId, attemptedAt",
+  sessionLogs: "id, date, activityId, [date+status]",
 });
 
 export function uid(): string {

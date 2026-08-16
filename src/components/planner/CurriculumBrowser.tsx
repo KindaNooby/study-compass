@@ -26,9 +26,11 @@ import {
   useCurriculum,
 } from "@/lib/planner";
 import type { LearningObjective, QuestionType, Subject } from "@/lib/planner";
+import { ObjectiveContent } from "@/components/planner/ObjectiveContent";
 import {
   BookOpen,
   ChevronRight,
+  Layers,
   Loader2,
   Pencil,
   Plus,
@@ -43,6 +45,7 @@ type DialogState =
   | { kind: "topic"; subjectId: string; unitId: string }
   | { kind: "objective-create"; subjectId: string; topicId: string }
   | { kind: "objective-edit"; objective: LearningObjective }
+  | { kind: "objective-content"; objective: LearningObjective }
   | null;
 
 function FieldError({ error }: { error: string | null }) {
@@ -386,10 +389,12 @@ function ObjectiveDialog({
 function ObjectiveRow({
   objective,
   onEdit,
+  onContent,
   onDelete,
 }: {
   objective: LearningObjective;
   onEdit: () => void;
+  onContent: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -397,6 +402,9 @@ function ObjectiveRow({
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-bold text-[#3a3b45]">{objective.title}</p>
         <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <Button type="button" variant="ghost" size="icon-sm" onClick={onContent} aria-label="Manage content">
+            <Layers className="size-3.5" />
+          </Button>
           <Button type="button" variant="ghost" size="icon-sm" onClick={onEdit} aria-label="Edit objective">
             <Pencil className="size-3.5" />
           </Button>
@@ -660,6 +668,7 @@ export function CurriculumBrowser() {
                                         key={objective.id}
                                         objective={objective}
                                         onEdit={() => setDialog({ kind: "objective-edit", objective })}
+                                        onContent={() => setDialog({ kind: "objective-content", objective })}
                                         onDelete={() => {
                                           if (confirmDelete(`Delete "${objective.title}"?`)) {
                                             void deleteObjective(objective.id);
@@ -709,6 +718,14 @@ export function CurriculumBrowser() {
           objective={dialog.objective}
           allObjectives={objectives}
           subjects={subjects}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === "objective-content" && (
+        <ObjectiveContent
+          key={dialog.objective.id}
+          open
+          objective={dialog.objective}
           onClose={() => setDialog(null)}
         />
       )}

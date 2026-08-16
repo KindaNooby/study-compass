@@ -142,3 +142,107 @@ export const studyActivitySchema = z.object({
   completedMinutes: z.number().int().min(0).optional(),
   source: z.enum(["planner", "manual"]),
 });
+
+// --- Phase 2: measurement ---
+
+export const cardStateSchema = z.enum(["New", "Learning", "Review", "Relearning"]);
+export const reviewGradeSchema = z.enum(["Again", "Hard", "Good", "Easy"]);
+export const isoDateTimeSchema = z.string().datetime();
+
+export const fsrsCardSchema = z.object({
+  id: z.string().min(1),
+  objectiveId: z.string().min(1),
+  front: z.string().trim().min(1, "Enter the question side").max(1000),
+  back: z.string().trim().min(1, "Enter the answer side").max(4000),
+  due: isoDateTimeSchema,
+  stability: z.number().min(0),
+  difficulty: z.number().min(0),
+  elapsedDays: z.number().min(0),
+  scheduledDays: z.number().min(0),
+  learningSteps: z.number().int().min(0),
+  reps: z.number().int().min(0),
+  lapses: z.number().int().min(0),
+  state: cardStateSchema,
+  lastReview: isoDateTimeSchema.nullable(),
+  suspended: z.boolean(),
+  createdAt: isoDateTimeSchema,
+});
+
+export const mcqOptionSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().trim().min(1, "Enter the option text").max(500),
+});
+
+export const questionSchema = z
+  .object({
+    id: z.string().min(1),
+    objectiveId: z.string().min(1),
+    kind: questionTypeSchema,
+    prompt: z.string().trim().min(1, "Enter a prompt").max(4000),
+    options: z.array(mcqOptionSchema),
+    correctOptionId: z.string().nullable(),
+    answerNote: z.string().max(4000),
+    difficulty: z.number().min(0).max(1),
+    errorCategoryIds: z.array(z.string()),
+    createdAt: isoDateTimeSchema,
+  })
+  .refine(
+    (question) =>
+      question.kind !== "mcq" ||
+      (question.options.length >= 2 &&
+        question.correctOptionId !== null &&
+        question.options.some((option) => option.id === question.correctOptionId)),
+    { message: "MCQ questions need at least two options and a marked correct answer" },
+  );
+
+export const reviewLogSchema = z.object({
+  id: z.string().min(1),
+  cardId: z.string().min(1),
+  objectiveId: z.string().min(1),
+  grade: reviewGradeSchema,
+  state: cardStateSchema,
+  due: isoDateTimeSchema,
+  stability: z.number().min(0),
+  difficulty: z.number().min(0),
+  scheduledDays: z.number().min(0),
+  elapsedMs: z.number().int().min(0),
+  activityId: z.string().optional(),
+  reviewedAt: isoDateTimeSchema,
+});
+
+export const practiceAttemptSchema = z.object({
+  id: z.string().min(1),
+  questionId: z.string().nullable(),
+  objectiveId: z.string().min(1),
+  kind: questionTypeSchema,
+  correct: z.boolean(),
+  score: z.number().min(0).nullable(),
+  maxScore: z.number().min(0).nullable(),
+  timeSeconds: z.number().int().min(0),
+  difficulty: z.number().min(0).max(1),
+  errorCategoryId: z.string().nullable(),
+  activityId: z.string().optional(),
+  attemptedAt: isoDateTimeSchema,
+});
+
+export const sessionStatusSchema = z.enum([
+  "completed",
+  "partial",
+  "skipped",
+  "missed",
+  "postponed",
+]);
+
+export const sessionLogSchema = z.object({
+  id: z.string().min(1),
+  date: dateKeySchema,
+  activityId: z.string().optional(),
+  kind: activityKindSchema.optional(),
+  objectiveIds: z.array(z.string()),
+  plannedMinutes: z.number().int().min(0),
+  actualMinutes: z.number().int().min(0),
+  status: sessionStatusSchema,
+  startedAt: isoDateTimeSchema.optional(),
+  endedAt: isoDateTimeSchema.optional(),
+  note: z.string().max(1000).optional(),
+});

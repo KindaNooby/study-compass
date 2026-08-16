@@ -1,22 +1,26 @@
 import { Button } from "@/components/ui/button";
 import { CurriculumBrowser } from "@/components/planner/CurriculumBrowser";
+import { Measure } from "@/components/planner/Measure";
 import { Overview } from "@/components/planner/Overview";
 import { Setup } from "@/components/planner/Setup";
+import { Study } from "@/components/planner/Study";
 import { useAuth } from "@/hooks/use-auth";
 import { initDatabase } from "@/lib/planner";
 import {
+  Activity,
   BookOpen,
   CloudOff,
   GraduationCap,
   LayoutDashboard,
   LogOut,
+  PlayCircle,
   Settings2,
   Sparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
-type View = "overview" | "curriculum" | "setup";
+type View = "overview" | "curriculum" | "setup" | "study" | "measure";
 
 function AppMark() {
   return (
@@ -63,6 +67,8 @@ function NavItem({
 
 const NAV_ITEMS: { view: View; label: string; icon: typeof LayoutDashboard }[] = [
   { view: "overview", label: "Overview", icon: LayoutDashboard },
+  { view: "study", label: "Study now", icon: PlayCircle },
+  { view: "measure", label: "Measure", icon: Activity },
   { view: "curriculum", label: "Curriculum", icon: BookOpen },
   { view: "setup", label: "Setup", icon: Settings2 },
 ];
@@ -88,7 +94,7 @@ export default function Dashboard() {
           <AppMark />
         </div>
         <div className="mt-12">
-          <p className="px-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[#9b9ca5]">Foundation</p>
+          <p className="px-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[#9b9ca5]">Workspace</p>
           <nav className="mt-3 space-y-1">
             {NAV_ITEMS.map((item) => (
               <NavItem
@@ -159,6 +165,8 @@ export default function Dashboard() {
 
         <div className="mx-auto max-w-[1360px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
           {view === "overview" && <Overview onNavigate={setView} />}
+          {view === "study" && <Study />}
+          {view === "measure" && <Measure />}
           {view === "curriculum" && <CurriculumBrowser />}
           {view === "setup" && <Setup />}
         </div>
