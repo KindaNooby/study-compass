@@ -1,5 +1,6 @@
 import { applyReview, emptyCardState } from "./fsrs";
 import { db, uid } from "./db";
+import { stableActivityKey, type PlannedActivity } from "./plan";
 import {
   availabilitySchema,
   examGoalSchema,
@@ -272,7 +273,7 @@ export async function saveAvailability(input: Availability): Promise<void> {
   await db.availability.put(availabilitySchema.parse(input));
 }
 
-// --- Activities (stored and queryable; scheduling arrives in phase 3) ---
+// --- Activities (stored and queryable; scheduled by the planner in phase 3) ---
 
 export async function addActivity(input: OmitId<StudyActivity>): Promise<StudyActivity> {
   const activity = studyActivitySchema.parse({ ...input, id: uid() });
@@ -282,6 +283,84 @@ export async function addActivity(input: OmitId<StudyActivity>): Promise<StudyAc
 
 export async function activitiesForDate(date: string): Promise<StudyActivity[]> {
   return db.activities.where("date").equals(date).toArray();
+}
+
+/**
+ * Reconciles the derived plan into the `activities` table by stable key:
+ * - New planner activities are added as `planned`.
+ * - Existing matching rows keep their status and refresh plan fields.
+ * - Stale planner rows in the range that the student hasn't started are removed.
+ * - `in_progress` / `completed` work is never deleted, and manual rows are untouched.
+ */
+export async function applyPlan(
+  planned: PlannedActivity[],
+  range: { start: string; end: string },
+): Promise<void> {
+  const existing = (
+    await db.activities.where("date").between(range.start, range.end, true, true).toArray()
+  ).filter((activity) => activity.source === "planner");
+
+  const plannedByKey = new Map<string, PlannedActivity>();
+  for (const item of planned) plannedByKey.set(stableActivityKey(item), item);
+  const existingByKey = new Map<string, StudyActivity>();
+  for (const item of existing) existingByKey.set(stableActivityKey(item), item);
+
+  const toAdd: StudyActivity[] = [];
+  const toUpdate: StudyActivity[] = [];
+  const toDelete: string[] = [];
+
+  for (const item of planned) {
+    const key = stableActivityKey(item);
+    const current = existingByKey.get(key);
+    if (current) {
+      toUpdate.push({
+        ...current,
+        examGoalId: item.examGoalId,
+        plannedMinutes: item.plannedMinutes,
+        questionCount: item.questionCount,
+        cardCount: item.cardCount,
+        questionType: item.questionType,
+        purpose: item.purpose,
+      });
+    } else {
+      toAdd.push(
+        studyActivitySchema.parse({
+          id: uid(),
+          examGoalId: item.examGoalId,
+          date: item.date,
+          kind: item.kind,
+          objectiveIds: item.objectiveIds,
+          subjectId: item.subjectId,
+          questionType: item.questionType,
+          plannedMinutes: item.plannedMinutes,
+          questionCount: item.questionCount,
+          cardCount: item.cardCount,
+          purpose: item.purpose,
+          status: "planned",
+          source: "planner",
+        }),
+      );
+    }
+  }
+
+  for (const current of existing) {
+    const key = stableActivityKey(current);
+    if (plannedByKey.has(key)) continue;
+    if (
+      current.status === "planned" ||
+      current.status === "missed" ||
+      current.status === "postponed" ||
+      current.status === "skipped"
+    ) {
+      toDelete.push(current.id);
+    }
+  }
+
+  await db.transaction("rw", db.activities, async () => {
+    if (toDelete.length > 0) await db.activities.bulkDelete(toDelete);
+    if (toAdd.length > 0) await db.activities.bulkAdd(toAdd);
+    if (toUpdate.length > 0) await db.activities.bulkPut(toUpdate);
+  });
 }
 
 // --- Cards (phase 2) ---

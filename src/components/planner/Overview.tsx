@@ -16,7 +16,7 @@ import {
 } from "@/lib/planner";
 import { ArrowRight, BookOpen, CalendarClock, Gauge, Loader2 } from "lucide-react";
 
-type Destination = "curriculum" | "setup";
+type Destination = "curriculum" | "setup" | "plan";
 
 function StatusPill({ ready }: { ready: boolean }) {
   return (
@@ -158,16 +158,26 @@ export function Overview({ onNavigate }: { onNavigate: (destination: Destination
       </section>
 
       <Card className="mt-6 rounded-[24px] border-[#e3e4eb] bg-[#eef2ff] py-0 shadow-none">
-        <CardContent className="p-6">
-          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#536da8]">
-            What comes next
-          </p>
-          <div className="mt-4 grid gap-3 text-sm text-[#5a6a94] sm:grid-cols-2">
-            <p><strong className="text-[#334a85]">Phase 3 · Planner</strong> — review forecast, priority, capacity, weekly allocation, and feasibility.</p>
-            <p><strong className="text-[#334a85]">Phase 4 · Adaptation</strong> — missed sessions, rolling replanning, and weekly analysis.</p>
-            <p><strong className="text-[#334a85]">Phase 5 · Experience</strong> — the calendar, drag-and-drop, and explanations.</p>
-            <p><strong className="text-[#334a85]">Phase 6 · Enhancements</strong> — cloud sync, syllabus ingestion, and error-pattern analysis.</p>
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 p-6">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#536da8]">
+              Your plan is ready
+            </p>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-[#5a6a94]">
+              The planner turns your curriculum, exam goals, and observed study time into a weekly
+              allocation with a feasibility check. Open it to see what to do first.
+            </p>
+            <p className="mt-2 text-xs text-[#7a86a8]">
+              Coming later: rolling adaptation, the calendar, and drag-and-drop editing.
+            </p>
           </div>
+          <Button
+            type="button"
+            className="h-10 rounded-full bg-[#3159b7] px-5 font-bold text-white hover:bg-[#264b9f]"
+            onClick={() => onNavigate("plan")}
+          >
+            Open your plan <ArrowRight className="size-4" />
+          </Button>
         </CardContent>
       </Card>
     </>

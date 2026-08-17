@@ -5,4 +5,5 @@ export * from "./repository";
 export * from "./selectors";
 export * from "./fsrs";
 export * from "./measurement";
+export * from "./plan";
 export * from "./store";

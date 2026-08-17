@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { CurriculumBrowser } from "@/components/planner/CurriculumBrowser";
 import { Measure } from "@/components/planner/Measure";
 import { Overview } from "@/components/planner/Overview";
+import { Plan } from "@/components/planner/Plan";
 import { Setup } from "@/components/planner/Setup";
 import { Study } from "@/components/planner/Study";
 import { useAuth } from "@/hooks/use-auth";
@@ -9,6 +10,7 @@ import { initDatabase } from "@/lib/planner";
 import {
   Activity,
   BookOpen,
+  CalendarDays,
   CloudOff,
   GraduationCap,
   LayoutDashboard,
@@ -20,7 +22,7 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
-type View = "overview" | "curriculum" | "setup" | "study" | "measure";
+type View = "overview" | "plan" | "curriculum" | "setup" | "study" | "measure";
 
 function AppMark() {
   return (
@@ -67,6 +69,7 @@ function NavItem({
 
 const NAV_ITEMS: { view: View; label: string; icon: typeof LayoutDashboard }[] = [
   { view: "overview", label: "Overview", icon: LayoutDashboard },
+  { view: "plan", label: "Plan", icon: CalendarDays },
   { view: "study", label: "Study now", icon: PlayCircle },
   { view: "measure", label: "Measure", icon: Activity },
   { view: "curriculum", label: "Curriculum", icon: BookOpen },
@@ -165,6 +168,7 @@ export default function Dashboard() {
 
         <div className="mx-auto max-w-[1360px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
           {view === "overview" && <Overview onNavigate={setView} />}
+          {view === "plan" && <Plan onNavigate={setView} />}
           {view === "study" && <Study onNavigate={setView} />}
           {view === "measure" && <Measure />}
           {view === "curriculum" && <CurriculumBrowser />}
