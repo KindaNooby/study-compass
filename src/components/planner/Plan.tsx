@@ -9,6 +9,7 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   ACTIVITY_KIND_LABELS,
+  addSessionLog,
   applyPlan,
   formatDateKey,
   isAvailabilityConfigured,
@@ -509,6 +510,23 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
   const handleSaveActivity = async (activity: StudyActivity) => {
     try {
       await saveActivity(activity);
+      // Closing a scheduled row is a real session result: write the append-only
+      // log so the observed-capacity model adapts to what actually happened.
+      if (activity.status === "completed" || activity.status === "skipped") {
+        await addSessionLog({
+          date: activity.date,
+          activityId: activity.id,
+          kind: activity.kind,
+          objectiveIds: activity.objectiveIds,
+          plannedMinutes: activity.plannedMinutes,
+          actualMinutes:
+            activity.status === "completed"
+              ? Math.max(1, activity.completedMinutes ?? activity.plannedMinutes)
+              : 0,
+          status: activity.status === "completed" ? "completed" : "skipped",
+          endedAt: new Date().toISOString(),
+        });
+      }
       toast.success("Schedule updated");
     } catch {
       toast.error("Could not update the schedule. Try again.");

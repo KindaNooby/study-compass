@@ -12,9 +12,12 @@ import {
   REVIEW_GRADES,
   addPracticeAttempt,
   addSessionLog,
+  closePlannedActivity,
+  formatDateKey,
   isDue,
   reviewCard,
   todayKey,
+  useActivities,
   useCards,
   useObjectives,
   useQuestions,
@@ -96,6 +99,15 @@ function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
         endedAt: new Date(endedAt).toISOString(),
         note: status === "partial" ? "Ended early" : undefined,
       });
+      // A completed run fulfills today's scheduled FSRS review activity, so the
+      // schedule reflects reality and replanning doesn't re-queue the same reviews.
+      if (status === "completed") {
+        await closePlannedActivity({
+          date: todayKey(),
+          kind: "fsrs_review",
+          minutes: actualMinutes,
+        });
+      }
     } catch {
       toast.error("Could not save the review session.");
     }
@@ -508,21 +520,48 @@ function PracticeLogger() {
 
 function SessionLogger() {
   const { data: objectives } = useObjectives();
+  const { data: activities } = useActivities();
 
   const [date, setDate] = useState(todayKey());
   const [kind, setKind] = useState<ActivityKind | "">("");
   const [objectiveId, setObjectiveId] = useState("");
+  const [activityId, setActivityId] = useState("");
   const [plannedMinutes, setPlannedMinutes] = useState("30");
   const [actualMinutes, setActualMinutes] = useState("30");
   const [status, setStatus] = useState<SessionStatus>("completed");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const scheduled = useMemo(
+    () =>
+      activities
+        .filter(
+          (activity) =>
+            activity.date >= todayKey() &&
+            (activity.status === "planned" || activity.status === "in_progress"),
+        )
+        .sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind)),
+    [activities],
+  );
+
+  /** Linking a session to a scheduled activity prefills its date, kind, and plan. */
+  const chooseActivity = (id: string) => {
+    setActivityId(id);
+    const activity = activities.find((item) => item.id === id);
+    if (!activity) return;
+    setDate(activity.date);
+    setKind(activity.kind);
+    setObjectiveId(activity.objectiveIds[0] ?? "");
+    setPlannedMinutes(String(activity.plannedMinutes));
+  };
+
   const submit = async () => {
     try {
       const attended = status === "completed" || status === "partial";
+      const linked = activityId ? activities.find((item) => item.id === activityId) : undefined;
       await addSessionLog({
         date,
+        activityId: activityId || undefined,
         kind: kind || undefined,
         objectiveIds: objectiveId ? [objectiveId] : [],
         plannedMinutes: Number(plannedMinutes) || 0,
@@ -531,6 +570,15 @@ function SessionLogger() {
         startedAt: attended ? new Date().toISOString() : undefined,
         note: note.trim() || undefined,
       });
+      // An attended session fulfills the scheduled activity it was linked to,
+      // closing the session-results → replanning loop.
+      if (linked && attended) {
+        await closePlannedActivity({
+          date: linked.date,
+          kind: linked.kind,
+          minutes: Math.max(1, Number(actualMinutes) || 0),
+        });
+      }
       toast.success("Session logged");
       setNote("");
       setError(null);
@@ -541,6 +589,24 @@ function SessionLogger() {
 
   return (
     <div className="grid gap-4">
+      {scheduled.length > 0 && (
+        <div className="grid gap-1.5">
+          <Label htmlFor="session-activity">Scheduled activity (optional)</Label>
+          <select
+            id="session-activity"
+            value={activityId}
+            onChange={(e) => chooseActivity(e.target.value)}
+            className="h-9 rounded-lg border border-[#dce0ed] bg-white px-2 text-xs font-semibold text-[#5a5b68]"
+          >
+            <option value="">Free-form session</option>
+            {scheduled.map((activity) => (
+              <option key={activity.id} value={activity.id}>
+                {formatDateKey(activity.date)} · {ACTIVITY_KIND_LABELS[activity.kind]}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="session-date">Date</Label>
@@ -674,7 +740,8 @@ export function Study({ onNavigate }: { onNavigate?: (view: "measure") => void }
               <CardHeader className="px-6 pb-3 pt-6">
                 <CardTitle className="text-[18px] font-bold tracking-[-0.02em]">Study time</CardTitle>
                 <CardDescription className="mt-1 text-xs">
-                  Planned versus actual minutes feed the observed-capacity model.
+                  Planned versus actual minutes feed the observed-capacity model. Link a session to
+                  a scheduled activity and it checks the activity off for you.
                 </CardDescription>
               </CardHeader>
               <CardContent className="px-6 pb-6">
