@@ -168,7 +168,8 @@ export function Overview({ onNavigate }: { onNavigate: (destination: Destination
               allocation with a feasibility check. Open it to see what to do first.
             </p>
             <p className="mt-2 text-xs text-[#7a86a8]">
-              Coming later: rolling adaptation, the calendar, and drag-and-drop editing.
+              Apply it to get an editable schedule — mark work complete, skip it, or move it. Coming
+              later: a full calendar, drag-and-drop rescheduling, and pinning.
             </p>
           </div>
           <Button

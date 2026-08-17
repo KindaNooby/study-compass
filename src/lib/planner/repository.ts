@@ -286,6 +286,15 @@ export async function activitiesForDate(date: string): Promise<StudyActivity[]> 
 }
 
 /**
+ * Persists a student edit to a scheduled activity (complete, skip, move,
+ * postpone, restore). The caller supplies the full updated row so validation
+ * happens in one place and the planner never guesses intent.
+ */
+export async function saveActivity(activity: StudyActivity): Promise<void> {
+  await db.activities.put(studyActivitySchema.parse(activity));
+}
+
+/**
  * Reconciles the derived plan into the `activities` table by stable key:
  * - New planner activities are added as `planned`.
  * - Existing matching rows keep their status and refresh plan fields.

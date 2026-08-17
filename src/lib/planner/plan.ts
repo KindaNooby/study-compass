@@ -20,6 +20,7 @@ import type {
   QuestionType,
   ReviewLog,
   SessionLog,
+  StudyActivity,
 } from "./types";
 
 // --- Config (single source of truth for the allocator's dials) ---
@@ -74,6 +75,13 @@ export type PlanState = {
   reviewLogs: ReviewLog[];
   sessionLogs: SessionLog[];
   examGoals: ExamGoal[];
+  /**
+   * Materialized schedule. Completed learning/practice activities count as
+   * real progress so they aren't recommended again on the next replan.
+   */
+  activities?: StudyActivity[];
+  /** Override the auto-selected next exam, e.g. when the student inspects a later goal. */
+  activeGoalId?: string;
   availability: Availability;
   now: Date;
 };
@@ -375,6 +383,65 @@ export function isUnlocked(
   });
 }
 
+function isLearningKind(kind: ActivityKind): boolean {
+  return kind === "learn_new_content" || kind === "retrieval_practise";
+}
+
+function isPracticeKind(kind: ActivityKind): boolean {
+  return (
+    kind === "mcq_practise" ||
+    kind === "structured_practise" ||
+    kind === "error_correction" ||
+    kind === "mixed_exam_practice"
+  );
+}
+
+/**
+ * Minutes the allocator should already treat as "handled" per objective.
+ * - Completed activities are real progress.
+ * - Future, unfinished manual activities are student reservations, so the
+ *   recommendation must not double-book the same work on another day.
+ */
+function accountedMinutesByObjective(
+  activities: StudyActivity[],
+  today: string,
+): {
+  learning: Map<string, number>;
+  practice: Map<string, number>;
+} {
+  const learning = new Map<string, number>();
+  const practice = new Map<string, number>();
+
+  for (const activity of activities) {
+    if (!isLearningKind(activity.kind) && !isPracticeKind(activity.kind)) continue;
+    const objectiveId = activity.objectiveIds[0];
+    if (!objectiveId) continue;
+
+    let accounted = 0;
+    if (activity.status === "completed") {
+      accounted =
+        activity.completedMinutes !== undefined && activity.completedMinutes > 0
+          ? activity.completedMinutes
+          : activity.plannedMinutes;
+    } else if (
+      activity.source === "manual" &&
+      activity.date >= today &&
+      activity.status !== "skipped"
+    ) {
+      accounted = Math.max(
+        0,
+        activity.plannedMinutes - (activity.completedMinutes ?? 0),
+      );
+    }
+
+    if (accounted <= 0) continue;
+    const target = isLearningKind(activity.kind) ? learning : practice;
+    target.set(objectiveId, (target.get(objectiveId) ?? 0) + accounted);
+  }
+
+  return { learning, practice };
+}
+
 // --- Planner ---
 
 function nearestStudyDayAtOrBefore(dateKey: string, availability: Availability): string | null {
@@ -467,9 +534,12 @@ function nextCandidate(item: WorkItem, sessionMinutes: number): Candidate | null
  * wholesale — only the resulting activities are materialized by the caller.
  */
 export function planStudy(state: PlanState): Plan {
-  const { now, availability } = state;
+  const { now, availability, activeGoalId } = state;
   const today = todayKey(now);
-  const goal = nextExam(state.examGoals, now);
+  const upcoming = nextExam(state.examGoals, now);
+  const goal = activeGoalId
+    ? state.examGoals.find((item) => item.id === activeGoalId) ?? upcoming
+    : upcoming;
   const horizonEnd = goal ? goal.examDate : addDays(today, DEFAULT_FORECAST_DAYS);
   const materializeDays = Math.max(
     1,
@@ -496,6 +566,7 @@ export function planStudy(state: PlanState): Plan {
   });
   const capacity = observeCapacity({ sessionLogs: state.sessionLogs, attempts: state.attempts });
   const secondsPerCard = observedSecondsPerCard(state.reviewLogs);
+  const accounted = accountedMinutesByObjective(state.activities ?? [], today);
 
   const inScope = goal
     ? state.objectives.filter((objective) => goal.subjectIds.includes(objective.subjectId))
@@ -515,8 +586,16 @@ export function planStudy(state: PlanState): Plan {
       measurement,
       priority,
       optional: goal ? goal.optionalTopicIds.includes(objective.topicId) : false,
-      remainingLearning: remainingLearningMinutes(objective, measurement),
-      remainingPractice: remainingPracticeMinutes(objective, measurement),
+      remainingLearning: Math.max(
+        0,
+        remainingLearningMinutes(objective, measurement) -
+          (accounted.learning.get(objective.id) ?? 0),
+      ),
+      remainingPractice: Math.max(
+        0,
+        remainingPracticeMinutes(objective, measurement) -
+          (accounted.practice.get(objective.id) ?? 0),
+      ),
       weakType: weakQuestionType(objective, measurement),
       hasErrors: measurement.errorBreakdown.length > 0,
       unlocked: isUnlocked(objective, measurements, state.objectives),
