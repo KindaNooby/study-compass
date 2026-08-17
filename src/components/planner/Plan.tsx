@@ -38,6 +38,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardList,
+  Info,
   ListChecks,
   Loader2,
   PenLine,
@@ -48,7 +49,7 @@ import {
   Target,
   Undo2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 const KIND_ICONS: Record<ActivityKind, typeof BookOpen> = {
@@ -359,7 +360,19 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
   const [view, setView] = useState<ScheduleView>("recommendation");
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
 
-  const now = useMemo(() => new Date(), []);
+  const [today, setToday] = useState(() => todayKey());
+  useEffect(() => {
+    const rollover = () => setToday(todayKey());
+    const nextMidnight = new Date();
+    nextMidnight.setHours(24, 0, 0, 0);
+    const timer = window.setTimeout(rollover, nextMidnight.getTime() - Date.now() + 1000);
+    document.addEventListener("visibilitychange", rollover);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", rollover);
+    };
+  }, []);
+  const now = useMemo(() => new Date(`${today}T12:00:00`), [today]);
   const loading =
     curriculum.loading ||
     goalsLoading ||
@@ -414,8 +427,6 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
     now,
   ]);
 
-  const today = todayKey(now);
-
   const scheduleDays = useMemo(() => {
     const upcoming = activities
       .filter((activity) => activity.date >= today)
@@ -436,6 +447,29 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
     );
   }, [activities, today]);
 
+  const nextAction = useMemo<{
+    date: string;
+    kind: ActivityKind;
+    objectiveIds: string[];
+    plannedMinutes: number;
+    reasons?: string[];
+  } | null>(() => {
+    if (!plan) return null;
+    for (const day of plan.days) {
+      if (!day.isStudyDay) continue;
+      const activity = day.pinnedActivities[0] ?? day.activities[0];
+      if (!activity) continue;
+      return {
+        date: day.date,
+        kind: activity.kind,
+        objectiveIds: activity.objectiveIds,
+        plannedMinutes: activity.plannedMinutes,
+        reasons: day.activities[0]?.reasons,
+      };
+    }
+    return null;
+  }, [plan]);
+
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -447,6 +481,10 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
   if (!plan) return null;
 
   const configured = isAvailabilityConfigured(availability);
+  const NextActionIcon = nextAction ? KIND_ICONS[nextAction.kind] : BookOpen;
+  const remainingWarnings = plan.warnings.filter(
+    (warning) => configured || !warning.startsWith("No availability configured"),
+  );
   const flatActivities = plan.days.flatMap((day) => day.activities);
   const weekReviewCards = plan.dueForecast
     .slice(0, plan.days.length)
@@ -561,6 +599,56 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
                   onClick={() => onNavigate("setup")}
                 >
                   Set availability
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {remainingWarnings.length > 0 && (
+            <Card className="mt-6 rounded-[24px] border-[#e9e2c8] bg-[#fffdf4] py-0 shadow-none">
+              <CardContent className="p-5">
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#8a7a3e]">Planner notes</p>
+                <ul className="mt-2 space-y-1.5">
+                  {remainingWarnings.map((warning) => (
+                    <li key={warning} className="flex items-start gap-2 text-xs leading-5 text-[#6f663f]">
+                      <Info className="mt-0.5 size-3.5 shrink-0 text-[#a08c4a]" />
+                      <span>{warning}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
+          {nextAction && (
+            <Card className="mt-6 rounded-[24px] border-[#cdd8f6] bg-[#eef2ff] py-0 shadow-none">
+              <CardContent className="flex flex-wrap items-center justify-between gap-4 p-6">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#536da8]">
+                    Do this next
+                    {nextAction.date === plan.horizonStart ? " · today" : ` · ${formatDateKey(nextAction.date)}`}
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <NextActionIcon className="size-4 text-[#4562a1]" />
+                    <p className="text-sm font-bold text-[#2c3550]">
+                      {ACTIVITY_KIND_LABELS[nextAction.kind]} · {nextAction.plannedMinutes} min
+                    </p>
+                  </div>
+                  <p className="mt-1 text-sm font-semibold text-[#5a6a94]">
+                    {nextAction.objectiveIds.length > 0
+                      ? nextAction.objectiveIds.map((id) => objectiveById.get(id) ?? id).join(", ")
+                      : "Whole-goal activity"}
+                  </p>
+                  {nextAction.reasons?.[0] && (
+                    <p className="mt-1 text-xs text-[#7a86a8]">{nextAction.reasons[0]}</p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  className="h-10 rounded-full bg-[#3159b7] px-5 font-bold text-white hover:bg-[#264b9f]"
+                  onClick={() => onNavigate("study")}
+                >
+                  Start now
                 </Button>
               </CardContent>
             </Card>
