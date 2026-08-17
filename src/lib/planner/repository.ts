@@ -322,6 +322,8 @@ export async function applyPlan(
     const key = stableActivityKey(item);
     const current = existingByKey.get(key);
     if (current) {
+      // A pinned row is a student lock: keep its date, minutes, and status as-is.
+      if (current.pinned) continue;
       toUpdate.push({
         ...current,
         examGoalId: item.examGoalId,
@@ -355,6 +357,7 @@ export async function applyPlan(
   for (const current of existing) {
     const key = stableActivityKey(current);
     if (plannedByKey.has(key)) continue;
+    if (current.pinned) continue;
     if (
       current.status === "planned" ||
       current.status === "missed" ||

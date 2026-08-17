@@ -141,6 +141,7 @@ export const studyActivitySchema = z.object({
   status: activityStatusSchema,
   completedMinutes: z.number().int().min(0).optional(),
   source: z.enum(["planner", "manual"]),
+  pinned: z.boolean().optional(),
 });
 
 // --- Phase 2: measurement ---

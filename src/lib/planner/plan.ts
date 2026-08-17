@@ -135,6 +135,9 @@ export type PlanDay = {
   capacityMinutes: number;
   allocatedMinutes: number;
   activities: PlannedActivity[];
+  /** Minutes reserved by pinned activities, fixed regardless of replanning. */
+  pinnedMinutes: number;
+  pinnedActivities: StudyActivity[];
 };
 
 export type BlockedObjective = {
@@ -397,49 +400,53 @@ function isPracticeKind(kind: ActivityKind): boolean {
 }
 
 /**
- * Minutes the allocator should already treat as "handled" per objective.
- * - Completed activities are real progress.
- * - Future, unfinished manual activities are student reservations, so the
- *   recommendation must not double-book the same work on another day.
+ * Splits schedule evidence into two different things:
+ * - Completed minutes are real progress and reduce the total work required.
+ * - Future manual/pinned minutes are reservations: they stop the allocator
+ *   from double-booking that work, but they do not reduce required work.
  */
-function accountedMinutesByObjective(
+function progressAndReservationsByObjective(
   activities: StudyActivity[],
   today: string,
 ): {
-  learning: Map<string, number>;
-  practice: Map<string, number>;
+  completedLearning: Map<string, number>;
+  completedPractice: Map<string, number>;
+  reservedLearning: Map<string, number>;
+  reservedPractice: Map<string, number>;
 } {
-  const learning = new Map<string, number>();
-  const practice = new Map<string, number>();
+  const completedLearning = new Map<string, number>();
+  const completedPractice = new Map<string, number>();
+  const reservedLearning = new Map<string, number>();
+  const reservedPractice = new Map<string, number>();
 
   for (const activity of activities) {
     if (!isLearningKind(activity.kind) && !isPracticeKind(activity.kind)) continue;
     const objectiveId = activity.objectiveIds[0];
     if (!objectiveId) continue;
+    const isLearning = isLearningKind(activity.kind);
 
-    let accounted = 0;
     if (activity.status === "completed") {
-      accounted =
+      const done =
         activity.completedMinutes !== undefined && activity.completedMinutes > 0
           ? activity.completedMinutes
           : activity.plannedMinutes;
+      const target = isLearning ? completedLearning : completedPractice;
+      target.set(objectiveId, (target.get(objectiveId) ?? 0) + done);
     } else if (
-      activity.source === "manual" &&
+      (activity.source === "manual" || activity.pinned === true) &&
       activity.date >= today &&
       activity.status !== "skipped"
     ) {
-      accounted = Math.max(
+      const reserved = Math.max(
         0,
         activity.plannedMinutes - (activity.completedMinutes ?? 0),
       );
+      const target = isLearning ? reservedLearning : reservedPractice;
+      target.set(objectiveId, (target.get(objectiveId) ?? 0) + reserved);
     }
-
-    if (accounted <= 0) continue;
-    const target = isLearningKind(activity.kind) ? learning : practice;
-    target.set(objectiveId, (target.get(objectiveId) ?? 0) + accounted);
   }
 
-  return { learning, practice };
+  return { completedLearning, completedPractice, reservedLearning, reservedPractice };
 }
 
 // --- Planner ---
@@ -566,7 +573,24 @@ export function planStudy(state: PlanState): Plan {
   });
   const capacity = observeCapacity({ sessionLogs: state.sessionLogs, attempts: state.attempts });
   const secondsPerCard = observedSecondsPerCard(state.reviewLogs);
-  const accounted = accountedMinutesByObjective(state.activities ?? [], today);
+  const progress = progressAndReservationsByObjective(state.activities ?? [], today);
+
+  // Pinned future work is fixed: it reserves capacity on its date and is never
+  // reallocated. Past pins don't reserve anything (their date is gone).
+  const pinnedByDate = new Map<string, StudyActivity[]>();
+  for (const activity of state.activities ?? []) {
+    if (
+      activity.pinned !== true ||
+      activity.date < today ||
+      activity.status === "completed" ||
+      activity.status === "skipped"
+    ) {
+      continue;
+    }
+    const list = pinnedByDate.get(activity.date) ?? [];
+    list.push(activity);
+    pinnedByDate.set(activity.date, list);
+  }
 
   const inScope = goal
     ? state.objectives.filter((objective) => goal.subjectIds.includes(objective.subjectId))
@@ -589,12 +613,14 @@ export function planStudy(state: PlanState): Plan {
       remainingLearning: Math.max(
         0,
         remainingLearningMinutes(objective, measurement) -
-          (accounted.learning.get(objective.id) ?? 0),
+          (progress.completedLearning.get(objective.id) ?? 0) -
+          (progress.reservedLearning.get(objective.id) ?? 0),
       ),
       remainingPractice: Math.max(
         0,
         remainingPracticeMinutes(objective, measurement) -
-          (accounted.practice.get(objective.id) ?? 0),
+          (progress.completedPractice.get(objective.id) ?? 0) -
+          (progress.reservedPractice.get(objective.id) ?? 0),
       ),
       weakType: weakQuestionType(objective, measurement),
       hasErrors: measurement.errorBreakdown.length > 0,
@@ -642,9 +668,24 @@ export function planStudy(state: PlanState): Plan {
 
   // Feasibility: required workload (learning + practice + reviews + mocks) vs.
   // effective available minutes from today through the exam.
-  const requiredWorkMinutes = work
-    .filter((item) => !item.optional)
-    .reduce((sum, item) => sum + item.remainingLearning + item.remainingPractice, 0);
+  // Feasibility uses "work still owed" = estimate minus completed progress.
+  // Reservations are not subtracted: pinned/moved work is still work to do.
+  const requiredWorkMinutes = inScope
+    .filter((objective) => (goal ? !goal.optionalTopicIds.includes(objective.topicId) : true))
+    .reduce((sum, objective) => {
+      const measurement = measurements.get(objective.id)!;
+      const learning = Math.max(
+        0,
+        remainingLearningMinutes(objective, measurement) -
+          (progress.completedLearning.get(objective.id) ?? 0),
+      );
+      const practice = Math.max(
+        0,
+        remainingPracticeMinutes(objective, measurement) -
+          (progress.completedPractice.get(objective.id) ?? 0),
+      );
+      return sum + learning + practice;
+    }, 0);
   const reviewMinutes = dueForecast.reduce((sum, point) => sum + point.minutes, 0);
   const mockMinutes = mocks.reduce((sum, mock) => sum + MOCK_EXAM_MINUTES, 0);
   const requiredMinutes = requiredWorkMinutes + reviewMinutes + mockMinutes;
@@ -677,8 +718,10 @@ export function planStudy(state: PlanState): Plan {
     const date = addDays(today, i);
     const studyDay = isStudyDay(date, availability);
     const cap = effectiveDailyMinutes(date, availability, capacity);
+    const pinned = pinnedByDate.get(date) ?? [];
+    const pinnedMinutes = pinned.reduce((sum, activity) => sum + activity.plannedMinutes, 0);
     const activities: PlannedActivity[] = [];
-    let budget = cap;
+    let budget = Math.max(0, cap - pinnedMinutes);
 
     // 1. Time-critical reviews first, so recall doesn't lapse.
     const due = dueByDate.get(date);
@@ -726,7 +769,9 @@ export function planStudy(state: PlanState): Plan {
 
     // 3. Flexible work by priority, respecting prerequisites and mastery state.
     // Recompute candidates after each session so a day is filled with the next
-    // highest-value work, one preferred-session chunk at a time.
+    // highest-value work, one preferred-session chunk at a time. Chunks of the
+    // same objective and kind are merged so each schedule row stays unique.
+    const flexibleByKey = new Map<string, PlannedActivity>();
     while (budget > 0) {
       const candidates = workItems
         .map((item) => ({ item, candidate: nextCandidate(item, sessionMinutes) }))
@@ -749,7 +794,8 @@ export function planStudy(state: PlanState): Plan {
       } else {
         best.item.remainingPractice -= take;
       }
-      activities.push({
+
+      const next: PlannedActivity = {
         date,
         kind: best.candidate.kind,
         objectiveIds: [best.item.objective.id],
@@ -761,17 +807,32 @@ export function planStudy(state: PlanState): Plan {
         purpose: best.candidate.purpose,
         score: round2(best.item.priority.score),
         reasons: best.candidate.reasons,
-      });
+      };
+
+      const key = stableActivityKey(next);
+      const merged = flexibleByKey.get(key);
+      if (merged) {
+        merged.plannedMinutes += take;
+        if (next.questionCount !== undefined) {
+          merged.questionCount = (merged.questionCount ?? 0) + next.questionCount;
+        }
+      } else {
+        flexibleByKey.set(key, next);
+      }
       budget -= take;
     }
+    activities.push(...flexibleByKey.values());
 
     days.push({
       date,
       weekday: weekdayOfDateKey(date),
       isStudyDay: studyDay,
       capacityMinutes: cap,
-      allocatedMinutes: activities.reduce((sum, activity) => sum + activity.plannedMinutes, 0),
+      allocatedMinutes:
+        pinnedMinutes + activities.reduce((sum, activity) => sum + activity.plannedMinutes, 0),
       activities,
+      pinnedMinutes,
+      pinnedActivities: pinned,
     });
   }
 

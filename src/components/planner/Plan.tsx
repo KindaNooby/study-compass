@@ -41,6 +41,8 @@ import {
   ListChecks,
   Loader2,
   PenLine,
+  Pin,
+  PinOff,
   RefreshCw,
   SkipForward,
   Target,
@@ -135,8 +137,41 @@ function ActivityRow({
   );
 }
 
+function PinnedActivityRow({
+  activity,
+  objectiveById,
+}: {
+  activity: StudyActivity;
+  objectiveById: Map<string, string>;
+}) {
+  const Icon = KIND_ICONS[activity.kind];
+  const objectiveLabel =
+    activity.objectiveIds.length > 0
+      ? activity.objectiveIds.map((id) => objectiveById.get(id) ?? id).join(", ")
+      : "Whole-goal activity";
+
+  return (
+    <div className="rounded-[14px] border border-[#c9d5f4] bg-[#eef2ff] p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#4562a1]">
+          <Icon className="size-3.5 text-[#4562a1]" />
+          {ACTIVITY_KIND_LABELS[activity.kind]}
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-[#d7e1ff] px-2 py-0.5 text-[10px] font-bold text-[#3557a5]">
+          <Pin className="size-3" /> Pinned
+        </span>
+      </div>
+      <p className="mt-2 text-sm font-semibold text-[#3a3b45]">{objectiveLabel}</p>
+      <p className="mt-1 text-[11px] font-medium text-[#7a86a8]">{activity.plannedMinutes} min reserved</p>
+    </div>
+  );
+}
+
 function DayCard({ day, objectiveById }: { day: PlanDay; objectiveById: Map<string, string> }) {
   const weekday = WEEKDAYS.find((item) => item.value === day.weekday);
+  const hasPinned = day.pinnedActivities.length > 0;
+  const hasDerived = day.activities.length > 0;
+
   return (
     <Card className="rounded-[22px] border-[#e3e4eb] bg-white py-0 shadow-[0_7px_20px_rgba(39,41,57,0.03)]">
       <CardHeader className="flex flex-row items-center justify-between px-5 pb-2 pt-5">
@@ -146,6 +181,7 @@ function DayCard({ day, objectiveById }: { day: PlanDay; objectiveById: Map<stri
           </CardTitle>
           <CardDescription className="mt-0.5 text-[11px]">
             {day.isStudyDay ? `${day.capacityMinutes} min available` : "Rest day"}
+            {day.pinnedMinutes > 0 && ` · ${day.pinnedMinutes} min pinned`}
           </CardDescription>
         </div>
         {day.isStudyDay && (
@@ -161,12 +197,15 @@ function DayCard({ day, objectiveById }: { day: PlanDay; objectiveById: Map<stri
         )}
       </CardHeader>
       <CardContent className="px-5 pb-5">
-        {day.activities.length === 0 ? (
+        {!hasPinned && !hasDerived ? (
           <p className="rounded-[12px] border border-dashed border-[#d8dae5] p-4 text-center text-xs text-muted-foreground">
             {day.isStudyDay ? "Nothing scheduled." : "No study planned."}
           </p>
         ) : (
           <div className="space-y-2">
+            {day.pinnedActivities.map((activity) => (
+              <PinnedActivityRow key={activity.id} activity={activity} objectiveById={objectiveById} />
+            ))}
             {day.activities.map((activity, index) => (
               <ActivityRow
                 key={`${activity.kind}-${activity.objectiveIds.join(",")}-${index}`}
@@ -210,6 +249,19 @@ function ScheduleActivityRow({
           {ACTIVITY_KIND_LABELS[activity.kind]}
         </span>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onSave({ ...activity, pinned: !activity.pinned })}
+            className={`cursor-pointer rounded-full p-1 transition-colors ${
+              activity.pinned
+                ? "bg-[#d7e1ff] text-[#3557a5]"
+                : "text-[#9b9ca5] hover:bg-[#f1f2f8] hover:text-[#5a5b68]"
+            }`}
+            aria-label={activity.pinned ? "Unpin activity" : "Pin activity"}
+            title={activity.pinned ? "Unpin" : "Pin to keep this where it is"}
+          >
+            {activity.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+          </button>
           <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${statusClass(activity.status)}`}>
             {STATUS_LABELS[activity.status]}
           </span>

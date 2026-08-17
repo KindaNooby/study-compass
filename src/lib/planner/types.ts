@@ -127,6 +127,8 @@ export type StudyActivity = {
   status: ActivityStatus;
   completedMinutes?: number;
   source: "planner" | "manual";
+  /** Student lock: the planner keeps this where it is instead of reallocating it. */
+  pinned?: boolean;
 };
 
 export type Curriculum = {

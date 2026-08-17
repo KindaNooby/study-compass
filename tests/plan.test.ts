@@ -16,6 +16,7 @@ import type {
   FsrsCard,
   LearningObjective,
   SessionLog,
+  StudyActivity,
 } from "../src/lib/planner/types";
 
 const NOW = new Date(2026, 7, 16, 10, 0, 0);
@@ -93,6 +94,23 @@ function session(overrides: Partial<SessionLog> = {}): SessionLog {
     plannedMinutes: 60,
     actualMinutes: 45,
     status: "completed",
+    ...overrides,
+  };
+}
+
+function makeActivity(overrides: Partial<StudyActivity> = {}): StudyActivity {
+  return {
+    id: "a1",
+    examGoalId: "g1",
+    date: "2026-08-17",
+    kind: "learn_new_content",
+    objectiveIds: ["o1"],
+    subjectId: "s1",
+    plannedMinutes: 30,
+    purpose: "learning",
+    status: "planned",
+    source: "planner",
+    pinned: true,
     ...overrides,
   };
 }
@@ -243,5 +261,51 @@ describe("planStudy", () => {
     });
     const plan = planStudy(state);
     expect(plan.days).toHaveLength(7);
+  });
+});
+
+describe("planStudy progress and reservations", () => {
+  test("completed learning minutes are not recommended again", () => {
+    const state = makeState({
+      objectives: [makeObjective({ estimatedLearningMinutes: 60 })],
+      examGoals: [makeGoal()],
+      activities: [
+        makeActivity({
+          pinned: false,
+          status: "completed",
+          completedMinutes: 30,
+        }),
+      ],
+    });
+    const plan = planStudy(state);
+    const learningMinutes = plan.days
+      .flatMap((day) => day.activities)
+      .filter((activity) => activity.kind === "learn_new_content")
+      .reduce((sum, activity) => sum + activity.plannedMinutes, 0);
+    expect(learningMinutes).toBe(30);
+  });
+
+  test("pinned work reserves its day and is not double-booked", () => {
+    const state = makeState({
+      objectives: [makeObjective({ estimatedLearningMinutes: 60 })],
+      examGoals: [makeGoal()],
+      activities: [
+        makeActivity({
+          date: "2026-08-17",
+          plannedMinutes: 30,
+          pinned: true,
+        }),
+      ],
+    });
+    const plan = planStudy(state);
+    const pinnedDay = plan.days.find((day) => day.date === "2026-08-17");
+    expect(pinnedDay?.pinnedMinutes).toBe(30);
+    expect(pinnedDay?.pinnedActivities).toHaveLength(1);
+
+    const learningMinutes = plan.days
+      .flatMap((day) => day.activities)
+      .filter((activity) => activity.kind === "learn_new_content")
+      .reduce((sum, activity) => sum + activity.plannedMinutes, 0);
+    expect(learningMinutes).toBe(30);
   });
 });
