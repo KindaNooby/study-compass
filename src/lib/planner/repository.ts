@@ -16,6 +16,7 @@ import {
   unitSchema,
 } from "./schemas";
 import type {
+  ActivityKind,
   Availability,
   ExamGoal,
   FsrsCard,
@@ -292,6 +293,36 @@ export async function activitiesForDate(date: string): Promise<StudyActivity[]> 
  */
 export async function saveActivity(activity: StudyActivity): Promise<void> {
   await db.activities.put(studyActivitySchema.parse(activity));
+}
+
+/**
+ * Closes the schedule↔session loop for a planner row: when a real session
+ * (e.g. an FSRS review run) fulfills an activity, mark the matching scheduled
+ * row complete so the schedule reflects reality. Only touches untouched
+ * planner rows — manual, pinned, or already-finished work is left alone.
+ */
+export async function closePlannedActivity(input: {
+  date: string;
+  kind: ActivityKind;
+  minutes: number;
+}): Promise<void> {
+  const matches = (await db.activities.where("date").equals(input.date).toArray()).filter(
+    (activity) =>
+      activity.kind === input.kind &&
+      activity.source === "planner" &&
+      (activity.status === "planned" || activity.status === "in_progress"),
+  );
+  if (matches.length === 0) return;
+  await db.activities.bulkPut(
+    matches.map((activity) => ({
+      ...activity,
+      status: "completed",
+      completedMinutes:
+        activity.completedMinutes !== undefined && activity.completedMinutes > 0
+          ? Math.max(activity.completedMinutes, input.minutes)
+          : input.minutes,
+    })),
+  );
 }
 
 /**
