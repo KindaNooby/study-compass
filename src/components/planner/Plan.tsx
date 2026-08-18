@@ -14,11 +14,15 @@ import {
   isAvailabilityConfigured,
   isStudyDay,
   minutesToTime,
+  moveActivity,
   nextExam,
+  occupiedBlocksForDate,
   placePlannedActivities,
   placeTimetable,
   planStudy,
   saveActivity,
+  snapActivity,
+  studyWindowsForWeekday,
   timeToMinutes,
   todayKey,
   useActivities,
@@ -56,8 +60,30 @@ import {
   Target,
   Undo2,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type DragEvent } from "react";
 import { toast } from "sonner";
+
+const ACTIVITY_DND_TYPE = "application/x-study-compass-activity";
+
+function isActionableStatus(status: ActivityStatus): boolean {
+  return status !== "completed" && status !== "skipped";
+}
+
+function setActivityDrag(event: DragEvent, id: string): void {
+  event.dataTransfer.setData(ACTIVITY_DND_TYPE, id);
+  event.dataTransfer.effectAllowed = "move";
+}
+
+function draggedActivityId(event: DragEvent): string {
+  return event.dataTransfer.getData(ACTIVITY_DND_TYPE);
+}
+
+function allowActivityDrop(event: DragEvent): void {
+  if (Array.from(event.dataTransfer.types).includes(ACTIVITY_DND_TYPE)) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }
+}
 
 const KIND_ICONS: Record<ActivityKind, typeof BookOpen> = {
   fsrs_review: RefreshCw,
@@ -250,7 +276,16 @@ function ScheduleActivityRow({
     activity.status === "in_progress";
 
   return (
-    <div className="rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] p-3">
+    <div
+      draggable={actionable}
+      onDragStart={(event) => {
+        if (!actionable) return;
+        setActivityDrag(event, activity.id);
+      }}
+      className={`rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] p-3 ${
+        actionable ? "cursor-grab active:cursor-grabbing" : ""
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#5a6a94]">
           <Icon className="size-3.5 text-[#5871ae]" />
@@ -373,6 +408,10 @@ function TodayView({
     const studyDay = isStudyDay(today, availability);
     const rows = activities.filter((activity) => activity.date === today);
 
+    const windows = studyWindowsForWeekday(availability, weekday);
+    const dayStart = Math.min(...windows.map((window) => timeToMinutes(window.start)));
+    const dayEnd = Math.max(...windows.map((window) => timeToMinutes(window.end)));
+
     const commitments = availability.fixedCommitments
       .filter((commitment) => commitment.day === weekday)
       .map((commitment) => ({
@@ -433,6 +472,8 @@ function TodayView({
         (sum, activity) => sum + (activity.completedMinutes ?? activity.plannedMinutes),
         0,
       ),
+      dayStart,
+      dayEnd,
     };
   }, [activities, availability, today]);
 
@@ -443,6 +484,43 @@ function TodayView({
       </div>
     );
   }
+
+  const handleDrop = async (event: DragEvent) => {
+    event.preventDefault();
+    const activityId = draggedActivityId(event);
+    if (!activityId) return;
+    const dragged = activities.find((activity) => activity.id === activityId);
+    if (!dragged) return;
+
+    const target = (event.target as HTMLElement).closest<HTMLElement>("[data-time-start]");
+    let requested = model.dayStart;
+    if (target) {
+      const start = Number(target.dataset.timeStart);
+      const end = Number(target.dataset.timeEnd);
+      const rect = target.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (event.clientY - rect.top) / Math.max(1, rect.height)));
+      requested = Math.round((start + ratio * (end - start)) / 5) * 5;
+    }
+
+    const occupied = occupiedBlocksForDate(activities, today, activityId);
+    const placement = snapActivity({
+      date: today,
+      minutes: dragged.plannedMinutes,
+      requestedStart: minutesToTime(requested),
+      availability,
+      occupied,
+    });
+    if (!placement) {
+      toast.error("That spot doesn't fit today's free time — try a wider gap.");
+      return;
+    }
+    try {
+      await moveActivity(activityId, { date: today, start: placement.start, end: placement.end });
+      toast.success("Activity moved");
+    } catch {
+      toast.error("Could not move the activity. Try again.");
+    }
+  };
 
   return (
     <section className="mt-6">
@@ -489,12 +567,19 @@ function TodayView({
         </Card>
       ) : (
         <Card className="mt-4 rounded-[24px] border-[#e3e4eb] bg-white py-0 shadow-[0_7px_20px_rgba(39,41,57,0.03)]">
-          <CardContent className="p-5">
+          <CardContent
+            className="p-5"
+            data-time-start={model.dayStart}
+            data-time-end={model.dayEnd}
+            onDragOver={allowActivityDrop}
+            onDrop={handleDrop}
+          >
             <div className="space-y-1.5">
               {model.entries.map((entry, index) => {
                 const prev = model.entries[index - 1];
                 const gap = prev && entry.start > prev.end ? { start: prev.end, end: entry.start } : null;
                 const Icon = entry.activity ? KIND_ICONS[entry.activity.kind] : null;
+                const actionable = entry.activity ? isActionableStatus(entry.activity.status) : false;
                 const objectiveLabel = entry.activity
                   ? entry.activity.objectiveIds.length > 0
                     ? entry.activity.objectiveIds.map((id) => objectiveById.get(id) ?? id).join(", ")
@@ -503,13 +588,21 @@ function TodayView({
                 return (
                   <Fragment key={index}>
                     {gap && (
-                      <div className="flex items-center gap-2 px-2 py-1 text-[11px] font-medium text-[#a0a1ab]">
+                      <div
+                        data-time-start={gap.start}
+                        data-time-end={gap.end}
+                        className="flex items-center gap-2 px-2 py-1 text-[11px] font-medium text-[#a0a1ab]"
+                      >
                         <span className="h-px flex-1 bg-[#ececf1]" />
                         {minutesToTime(gap.start)}–{minutesToTime(gap.end)} free
                       </div>
                     )}
                     {entry.type === "commitment" ? (
-                      <div className="flex items-center justify-between rounded-[14px] border border-[#f0e3c2] bg-[#fff8ea] px-3 py-2.5">
+                      <div
+                        data-time-start={entry.start}
+                        data-time-end={entry.end}
+                        className="flex items-center justify-between rounded-[14px] border border-[#f0e3c2] bg-[#fff8ea] px-3 py-2.5"
+                      >
                         <div className="flex items-center gap-2">
                           <Clock className="size-3.5 text-[#a97a1f]" />
                           <span className="text-xs font-bold text-[#7a5a16]">Busy · {entry.label}</span>
@@ -519,7 +612,18 @@ function TodayView({
                         </span>
                       </div>
                     ) : (
-                      <div className="flex items-center justify-between gap-3 rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] px-3 py-2.5">
+                      <div
+                        draggable={actionable}
+                        onDragStart={(event) => {
+                          if (!entry.activity || !actionable) return;
+                          setActivityDrag(event, entry.activity.id);
+                        }}
+                        data-time-start={entry.start}
+                        data-time-end={entry.end}
+                        className={`flex items-center justify-between gap-3 rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] px-3 py-2.5 ${
+                          actionable ? "cursor-grab active:cursor-grabbing" : ""
+                        }`}
+                      >
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#5a6a94]">
                             {Icon && <Icon className="size-3.5 text-[#5871ae]" />}
@@ -720,6 +824,38 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
       toast.success("Schedule updated");
     } catch {
       toast.error("Could not update the schedule. Try again.");
+    }
+  };
+
+  const handleScheduleDayDrop = async (event: DragEvent, date: string) => {
+    event.preventDefault();
+    if (!availability) return;
+    const activityId = draggedActivityId(event);
+    if (!activityId) return;
+    const dragged = activities.find((activity) => activity.id === activityId);
+    if (!dragged) return;
+
+    if (!isStudyDay(date, availability)) {
+      toast.error("That's a rest day — pick a study day.");
+      return;
+    }
+    const occupied = occupiedBlocksForDate(activities, date, activityId);
+    const placement = snapActivity({
+      date,
+      minutes: dragged.plannedMinutes,
+      requestedStart: "00:00",
+      availability,
+      occupied,
+    });
+    if (!placement) {
+      toast.error("That day has no free window that fits this activity.");
+      return;
+    }
+    try {
+      await moveActivity(activityId, { date, start: placement.start, end: placement.end });
+      toast.success(`Moved to ${formatDateKey(date)}`);
+    } catch {
+      toast.error("Could not move the activity. Try again.");
     }
   };
 
@@ -1068,6 +1204,8 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
                   <Card
                     key={day.date}
                     className="rounded-[22px] border-[#e3e4eb] bg-white py-0 shadow-[0_7px_20px_rgba(39,41,57,0.03)]"
+                    onDragOver={allowActivityDrop}
+                    onDrop={(event) => handleScheduleDayDrop(event, day.date)}
                   >
                     <CardHeader className="px-5 pb-2 pt-5">
                       <div className="flex items-center justify-between">

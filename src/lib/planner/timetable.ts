@@ -239,3 +239,22 @@ export function placePlannedActivities(
   }
   return placements;
 }
+
+/**
+ * The clock blocks already taken by placed activities on a date. Used by the
+ * drag-and-drop rescheduler so a row being moved doesn't collide with itself
+ * (`excludeId`) or its neighbours when re-snapped.
+ */
+export function occupiedBlocksForDate(
+  activities: { id: string; date: string; start?: string; end?: string }[],
+  date: string,
+  excludeId?: string,
+): { start: string; end: string }[] {
+  return activities
+    .filter((activity) => activity.date === date && activity.id !== excludeId)
+    .filter(
+      (activity): activity is { id: string; date: string; start: string; end: string } =>
+        activity.start !== undefined && activity.end !== undefined,
+    )
+    .map((activity) => ({ start: activity.start, end: activity.end }));
+}

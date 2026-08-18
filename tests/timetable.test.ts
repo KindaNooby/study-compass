@@ -5,6 +5,7 @@ import type { PlannedActivity } from "../src/lib/planner/plan";
 import {
   DEFAULT_STUDY_WINDOW,
   minutesToTime,
+  occupiedBlocksForDate,
   placePlannedActivities,
   placeTimetable,
   snapActivity,
@@ -190,6 +191,23 @@ describe("snapActivity", () => {
         }),
       }),
     ).toBeNull();
+  });
+});
+
+describe("occupiedBlocksForDate", () => {
+  test("collects placed rows on the date and excludes the moved row itself", () => {
+    expect(
+      occupiedBlocksForDate(
+        [
+          { id: "a", date: "2026-08-17", start: "09:00", end: "09:30" },
+          { id: "b", date: "2026-08-17", start: "10:00", end: "10:30" },
+          { id: "c", date: "2026-08-18", start: "09:00", end: "09:30" },
+          { id: "d", date: "2026-08-17" },
+        ],
+        "2026-08-17",
+        "b",
+      ),
+    ).toEqual([{ start: "09:00", end: "09:30" }]);
   });
 });
 

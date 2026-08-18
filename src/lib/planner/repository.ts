@@ -359,6 +359,37 @@ export async function saveActivity(activity: StudyActivity): Promise<void> {
 }
 
 /**
+ * Persists a drag-and-drop reschedule. Moving a row makes it a student-owned
+ * lock (`source: "manual"` + `pinned: true`) so the planner keeps it exactly
+ * where the student put it instead of reallocating or deleting it on re-apply.
+ * A `start`/`end` of undefined clears a clock placement (e.g. a cross-day move
+ * that should be re-snapped later).
+ */
+export async function moveActivity(
+  activityId: string,
+  target: { date: string; start?: string; end?: string },
+): Promise<void> {
+  await db.transaction("rw", db.activities, async () => {
+    const activity = await db.activities.get(activityId);
+    if (!activity) return;
+    await db.activities.put(
+      studyActivitySchema.parse({
+        ...activity,
+        date: target.date,
+        start: target.start,
+        end: target.end,
+        source: "manual",
+        pinned: true,
+        // A reschedule is a fresh placement, never a stale outcome: dragged work
+        // returns to `planned` so missed/postponed rows don't stay mislabeled.
+        status: "planned",
+        completedMinutes: undefined,
+      }),
+    );
+  });
+}
+
+/**
  * Closes the schedule↔session loop for a planner row: when a real session
  * (e.g. an FSRS review run) fulfills an activity, mark the matching scheduled
  * row complete so the schedule reflects reality. Only touches untouched
