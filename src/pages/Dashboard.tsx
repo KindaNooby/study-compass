@@ -4,7 +4,6 @@ import { Overview } from "@/components/planner/Overview";
 import { Plan } from "@/components/planner/Plan";
 import { Setup } from "@/components/planner/Setup";
 import { Study } from "@/components/planner/Study";
-import { useAuth } from "@/hooks/use-auth";
 import { initDatabase } from "@/lib/planner";
 import {
   Activity,
@@ -13,13 +12,11 @@ import {
   CloudOff,
   GraduationCap,
   LayoutDashboard,
-  LogOut,
   PlayCircle,
   Settings2,
   Sparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
 
 type View = "overview" | "plan" | "curriculum" | "setup" | "study" | "measure";
 
@@ -76,18 +73,11 @@ const NAV_ITEMS: { view: View; label: string; icon: typeof LayoutDashboard }[] =
 ];
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
-  const navigate = useNavigate();
   const [view, setView] = useState<View>("overview");
 
   useEffect(() => {
     void initDatabase();
   }, []);
-
-  const handleSignOut = async () => {
-    await signOut();
-    navigate("/");
-  };
 
   return (
     <div className="min-h-screen bg-[#f8f8fc] text-foreground">
@@ -112,15 +102,12 @@ export default function Dashboard() {
         <div className="mt-auto">
           <div className="flex items-center gap-3 rounded-[18px] bg-[#f2f3f8] px-3 py-3">
             <div className="flex size-9 items-center justify-center rounded-full bg-[#d7e1ff] text-xs font-bold text-[#3557a5]">
-              {(user?.name ?? "A").slice(0, 1).toUpperCase()}
+              <CloudOff className="size-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-bold text-[#44454f]">{user?.name ?? "Your workspace"}</p>
-              <p className="mt-0.5 text-[10px] font-medium text-[#898a94]">Personal plan</p>
+              <p className="truncate text-xs font-bold text-[#44454f]">Offline workspace</p>
+              <p className="mt-0.5 text-[10px] font-medium text-[#898a94]">Saved on this device</p>
             </div>
-            <button type="button" onClick={handleSignOut} className="text-[#8c8d96] hover:text-[#474852]" aria-label="Sign out">
-              <LogOut className="size-4" />
-            </button>
           </div>
         </div>
       </aside>
@@ -139,14 +126,12 @@ export default function Dashboard() {
             <div className="hidden items-center gap-2 rounded-full border border-[#dfe1eb] bg-white/70 px-3 py-2 text-[11px] font-bold text-[#777883] sm:flex">
               <CloudOff className="size-3.5 text-[#5871ae]" /> Saved on device
             </div>
-            <button
-              type="button"
+            <div
               className="flex size-9 items-center justify-center rounded-full bg-[#d7e1ff] text-xs font-bold text-[#3557a5] lg:hidden"
-              onClick={handleSignOut}
-              aria-label="Sign out"
+              aria-label="Offline workspace"
             >
-              {(user?.name ?? "A").slice(0, 1).toUpperCase()}
-            </button>
+              <CloudOff className="size-4" />
+            </div>
           </div>
         </header>
 

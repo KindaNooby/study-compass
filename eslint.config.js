@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 
 export default tseslint.config(
-  { ignores: ["dist", "src/convex/_generated/**"] },
+  { ignores: ["dist"] },
   {
     extends: [
       js.configs.recommended,

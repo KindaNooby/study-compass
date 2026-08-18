@@ -1,4 +1,3 @@
-import { vlyPlugin } from "@vly-ai/integrations";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
@@ -6,7 +5,7 @@ import { defineConfig } from "vite";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [vlyPlugin(), react(), tailwindcss()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -22,7 +21,6 @@ export default defineConfig({
         manualChunks: {
           // Vendor chunks for large libraries
           'react-vendor': ['react', 'react-dom', 'react-router'],
-          'convex-vendor': ['convex'],
           // Large UI library chunks
           'radix-ui': [
             '@radix-ui/react-accordion',
@@ -53,7 +51,7 @@ export default defineConfig({
           // Heavy optional libraries - separate chunks for better lazy loading
           'framer-motion': ['framer-motion'],
           'charts': ['recharts'],
-          'forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
+          'forms': ['react-hook-form', 'zod'],
         },
         // Optimize chunk size
         chunkFileNames: 'assets/[name]-[hash].js',
@@ -74,7 +72,6 @@ export default defineConfig({
       'react',
       'react-dom',
       'react-router',
-      '@convex-dev/auth/react',
     ],
   },
   // Performance hints
