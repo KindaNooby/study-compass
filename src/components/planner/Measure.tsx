@@ -12,7 +12,7 @@ import {
 } from "@/lib/planner";
 import type { AcquisitionLevel } from "@/lib/planner";
 import { Loader2 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 function pct(value: number | null): string {
   return value === null ? "—" : `${Math.round(value * 100)}%`;
@@ -52,7 +52,10 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
 export function Measure() {
   const { cards, reviewLogs, attempts, sessionLogs, loading } = useMeasurementData();
   const { data: objectives } = useObjectives();
-  const now = new Date();
+  // Pin `now` to mount so the measurement memo actually memoizes instead of
+  // recomputing on every render (a fresh `new Date()` would bust the deps).
+  // The view remounts on tab switch, so this stays current per visit.
+  const [now] = useState(() => new Date());
 
   const measurements = useMemo(
     () => measureCurriculum({ objectives, cards, attempts, logs: reviewLogs, now }),

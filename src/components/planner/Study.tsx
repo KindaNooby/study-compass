@@ -585,6 +585,7 @@ function SessionLogger() {
           date: linked.date,
           kind: linked.kind,
           minutes: Math.max(1, Number(actualMinutes) || 0),
+          activityId: linked.id,
         });
       }
       toast.success("Session logged");
