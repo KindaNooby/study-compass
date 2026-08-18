@@ -43,6 +43,17 @@ function RouteSyncer() {
 }
 
 
+// Register the service worker for offline support. The dev server serves
+// modules on the fly, so offline caching is only meaningful for production
+// builds; registering there keeps the preview server untouched.
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((error) => {
+      console.warn("Service worker registration failed:", error);
+    });
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <VlyToolbar />
