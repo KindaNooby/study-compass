@@ -7,6 +7,7 @@ import {
   minutesToTime,
   placePlannedActivities,
   placeTimetable,
+  snapActivity,
   studyWindowsForWeekday,
   timeToMinutes,
   TIME_OF_DAY_WINDOWS,
@@ -120,6 +121,75 @@ describe("placeTimetable", () => {
     expect(result.placed).toEqual([
       { activityId: "b", start: "09:30", end: "10:00", placedMinutes: 30 },
     ]);
+  });
+});
+
+describe("snapActivity", () => {
+  test("snaps to the requested start inside a free block", () => {
+    expect(
+      snapActivity({
+        date: "2026-08-17",
+        minutes: 30,
+        requestedStart: "09:15",
+        availability: availability({
+          timeWindows: [{ day: 1, start: "09:00", end: "11:00" }],
+        }),
+      }),
+    ).toEqual({ start: "09:15", end: "09:45" });
+  });
+
+  test("pushes past occupied blocks to the next free slot", () => {
+    expect(
+      snapActivity({
+        date: "2026-08-17",
+        minutes: 30,
+        requestedStart: "09:00",
+        availability: availability({
+          timeWindows: [{ day: 1, start: "09:00", end: "11:00" }],
+        }),
+        occupied: [{ start: "09:00", end: "10:00" }],
+      }),
+    ).toEqual({ start: "10:00", end: "10:30" });
+  });
+
+  test("respects fixed commitments when snapping", () => {
+    expect(
+      snapActivity({
+        date: "2026-08-17",
+        minutes: 30,
+        requestedStart: "09:30",
+        availability: availability({
+          timeWindows: [{ day: 1, start: "09:00", end: "11:00" }],
+          fixedCommitments: [{ id: "c", day: 1, start: "10:00", end: "11:00", label: "Class" }],
+        }),
+      }),
+    ).toEqual({ start: "09:30", end: "10:00" });
+  });
+
+  test("returns null when the activity fits no single free block", () => {
+    expect(
+      snapActivity({
+        date: "2026-08-17",
+        minutes: 120,
+        requestedStart: "09:00",
+        availability: availability({
+          timeWindows: [{ day: 1, start: "09:00", end: "10:00" }],
+        }),
+      }),
+    ).toBeNull();
+  });
+
+  test("returns null when the requested start is after every window", () => {
+    expect(
+      snapActivity({
+        date: "2026-08-17",
+        minutes: 30,
+        requestedStart: "22:00",
+        availability: availability({
+          timeWindows: [{ day: 1, start: "09:00", end: "10:00" }],
+        }),
+      }),
+    ).toBeNull();
   });
 });
 

@@ -175,6 +175,38 @@ export function placeTimetable(input: {
 }
 
 /**
+ * Snaps one activity to the first free slot that fits at or after
+ * `requestedStart`, avoiding fixed commitments and `occupied` blocks. Returns
+ * null when the activity fits no single free block on that date, so the caller
+ * can decide how to handle a move that doesn't fit (an honest "no room" signal).
+ */
+export function snapActivity(input: {
+  date: string;
+  minutes: number;
+  requestedStart: string; // HH:MM
+  availability: Availability;
+  occupied?: { start: string; end: string }[];
+}): { start: string; end: string } | null {
+  const weekday = weekdayOfDateKey(input.date);
+  const occupiedRanges = (input.occupied ?? []).map((block) => ({
+    start: timeToMinutes(block.start),
+    end: timeToMinutes(block.end),
+  }));
+  const free = subtractRanges(freeRangesForWeekday(input.availability, weekday), occupiedRanges);
+  const requested = timeToMinutes(input.requestedStart);
+  const minutes = Math.max(0, Math.round(input.minutes));
+  if (minutes <= 0) return null;
+
+  for (const range of free) {
+    const start = Math.max(range.start, requested);
+    if (range.end - start >= minutes) {
+      return { start: minutesToTime(start), end: minutesToTime(start + minutes) };
+    }
+  }
+  return null;
+}
+
+/**
  * Places a derived plan's activities into clock slots, keyed by stable activity
  * key so `applyPlan` can attach the times to the rows it materializes. Days are
  * placed independently; within a day the input order (reviews → mocks → work by
