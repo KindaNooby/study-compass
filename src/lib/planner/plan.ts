@@ -1220,7 +1220,9 @@ export function projectRoadmap(state: PlanState): Roadmap {
     entry.completedMinutes += learningDone + practiceDone;
     entry.remainingMinutes += learningOwed + practiceOwed;
     if (!isUnlocked(objective, measurements, state.objectives)) {
-      entry.blockedMinutes += learningOwed + practiceOwed;
+      // Only learning is gated on prerequisites; practice is still schedulable,
+      // so blocked work counts the learning minutes alone.
+      entry.blockedMinutes += learningOwed;
     }
     bySubject.set(objective.subjectId, entry);
   }

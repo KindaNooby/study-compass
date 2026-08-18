@@ -340,6 +340,9 @@ export async function saveActivity(activity: StudyActivity): Promise<void> {
       // Restore: the row is no longer finished, so its outcome fact is withdrawn.
       await db.sessionLogs.where("activityId").equals(parsed.id).delete();
     } else if (isTerminal) {
+      // A new terminal outcome supersedes any earlier postponement/miss record
+      // for the same activity, so exactly one outcome fact remains.
+      await db.sessionLogs.where("activityId").equals(parsed.id).delete();
       await db.sessionLogs.add(
         sessionLogSchema.parse({
           id: uid(),

@@ -247,6 +247,30 @@ describe("placePlannedActivities", () => {
     });
     expect(placements.size).toBe(2);
   });
+
+  test("avoids student-placed clock blocks when placing new work", () => {
+    const planned: PlannedActivity[] = [
+      {
+        date: "2026-08-17",
+        kind: "learn_new_content",
+        objectiveIds: ["o1"],
+        subjectId: "s1",
+        plannedMinutes: 30,
+        purpose: "learning",
+        score: 0.8,
+        reasons: ["test"],
+      },
+    ];
+    const placements = placePlannedActivities(
+      planned,
+      availability({ timeWindows: [{ day: 1, start: "09:00", end: "10:00" }] }),
+      new Map([["2026-08-17", [{ start: "09:00", end: "09:30" }]]]),
+    );
+    expect(placements.get("2026-08-17|learn_new_content|s1|o1")).toEqual({
+      start: "09:30",
+      end: "10:00",
+    });
+  });
 });
 
 describe("buildDayTimetable", () => {

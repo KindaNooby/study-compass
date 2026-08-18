@@ -432,6 +432,26 @@ describe("projectRoadmap", () => {
     expect(blocked?.coverage).toBe(0);
   });
 
+  test("counts only learning as blocked, not practice", () => {
+    const state = makeState({
+      objectives: [
+        makeObjective({ id: "a", subjectId: "s1", title: "A", estimatedLearningMinutes: 100, estimatedPracticeMinutes: 0 }),
+        makeObjective({
+          id: "b",
+          subjectId: "s2",
+          title: "B",
+          estimatedLearningMinutes: 100,
+          estimatedPracticeMinutes: 50,
+          prerequisiteIds: ["a"],
+        }),
+      ],
+      examGoals: [makeGoal({ subjectIds: ["s1", "s2"], subjectWeighting: { s1: 1, s2: 1 } })],
+    });
+    const blocked = projectRoadmap(state).subjects.find((subject) => subject.subjectId === "s2");
+    expect(blocked?.blockedMinutes).toBe(100); // learning only, not the 50 practice
+    expect(blocked?.remainingMinutes).toBe(150); // 100 learning + 50 practice owed
+  });
+
   test("lists milestones in date order and returns null onTrack without a goal", () => {
     const state = makeState({
       objectives: [makeObjective()],

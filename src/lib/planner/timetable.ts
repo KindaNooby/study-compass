@@ -215,6 +215,8 @@ export function snapActivity(input: {
 export function placePlannedActivities(
   planned: PlannedActivity[],
   availability: Availability,
+  /** Clock blocks already owned by student-placed rows, so re-placing never overlaps them. */
+  occupiedByDate: Map<string, { start: string; end: string }[]> = new Map(),
 ): Map<string, { start: string; end: string }> {
   const byDate = new Map<string, PlannedActivity[]>();
   for (const item of planned) {
@@ -232,6 +234,7 @@ export function placePlannedActivities(
         plannedMinutes: item.plannedMinutes,
       })),
       availability,
+      occupied: occupiedByDate.get(date),
     });
     for (const block of result.placed) {
       placements.set(block.activityId, { start: block.start, end: block.end });

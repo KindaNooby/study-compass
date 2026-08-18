@@ -248,6 +248,7 @@ function ScheduleActivityRow({
   onSnooze,
   onReplace,
   onExplain,
+  onMove,
 }: {
   activity: StudyActivity;
   objectiveById: Map<string, string>;
@@ -255,6 +256,7 @@ function ScheduleActivityRow({
   onSnooze: (activity: StudyActivity) => void;
   onReplace: (activity: StudyActivity) => void;
   onExplain: (activity: ExplainTarget) => void;
+  onMove: (activity: StudyActivity, date: string) => void;
 }) {
   const [rescheduling, setRescheduling] = useState(false);
   const Icon = KIND_ICONS[activity.kind];
@@ -321,12 +323,7 @@ function ScheduleActivityRow({
             onChange={(event) => {
               const nextDate = event.target.value;
               if (!nextDate) return;
-              onSave({
-                ...activity,
-                date: nextDate,
-                status: activity.status === "postponed" ? "postponed" : "planned",
-                source: "manual",
-              });
+              onMove(activity, nextDate);
               setRescheduling(false);
             }}
             className="h-8 w-fit rounded-lg border-[#dce0ed] text-xs font-semibold text-[#5a5b68]"
@@ -786,7 +783,15 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
     setApplying(true);
     try {
       const lastDay = plan.days[plan.days.length - 1];
-      const placements = placePlannedActivities(flatActivities, availability);
+      const occupiedByDate = new Map<string, { start: string; end: string }[]>();
+      for (const activity of activities) {
+        if (!activity.start || !activity.end) continue;
+        if (activity.source !== "manual" && activity.pinned !== true) continue;
+        const list = occupiedByDate.get(activity.date) ?? [];
+        list.push({ start: activity.start, end: activity.end });
+        occupiedByDate.set(activity.date, list);
+      }
+      const placements = placePlannedActivities(flatActivities, availability, occupiedByDate);
       await applyPlan(flatActivities, { start: plan.horizonStart, end: lastDay.date }, placements);
       setApplied(true);
       setView("today");
@@ -865,6 +870,32 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
       toast.success(`Snoozed to ${formatDateKey(target)}`);
     } catch {
       toast.error("Could not snooze the activity. Try again.");
+    }
+  };
+
+  const handleMove = async (activity: StudyActivity, date: string) => {
+    if (!availability) return;
+    if (!isStudyDay(date, availability)) {
+      toast.error("That's a rest day — pick a study day.");
+      return;
+    }
+    const occupied = occupiedBlocksForDate(activities, date, activity.id);
+    const placement = snapActivity({
+      date,
+      minutes: activity.plannedMinutes,
+      requestedStart: "00:00",
+      availability,
+      occupied,
+    });
+    if (!placement) {
+      toast.error("That day has no free window that fits this activity.");
+      return;
+    }
+    try {
+      await moveActivity(activity.id, { date, start: placement.start, end: placement.end });
+      toast.success(`Moved to ${formatDateKey(date)}`);
+    } catch {
+      toast.error("Could not move the activity. Try again.");
     }
   };
 
@@ -1294,6 +1325,7 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
                             onSnooze={handleSnooze}
                             onReplace={setReplacing}
                             onExplain={(activity) => setExplaining(activity)}
+                            onMove={handleMove}
                           />
                         ))}
                       </div>
@@ -1361,7 +1393,13 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
             <DialogTitle>Why this activity?</DialogTitle>
             <DialogDescription>
               {explanation
-                ? `${ACTIVITY_KIND_LABELS[explanation.kind]} · ${formatDateKey(explanation.date)} · ${explanation.plannedMinutes} min`
+                ? `${ACTIVITY_KIND_LABELS[explanation.kind]} · ${
+                    explanation.objectiveTitles.length === 0
+                      ? "Whole-goal activity"
+                      : explanation.objectiveTitles.length <= 3
+                        ? explanation.objectiveTitles.join(", ")
+                        : `${explanation.objectiveTitles.length} objectives`
+                  } · ${formatDateKey(explanation.date)} · ${explanation.plannedMinutes} min`
                 : ""}
             </DialogDescription>
           </DialogHeader>
