@@ -6,4 +6,5 @@ export * from "./selectors";
 export * from "./fsrs";
 export * from "./measurement";
 export * from "./plan";
+export * from "./timetable";
 export * from "./store";
