@@ -47,6 +47,7 @@ export function normalizeAvailability(input: Availability): Availability {
   return {
     ...input,
     availableDays: uniqueSorted(input.availableDays),
+    bufferFactor: clamp01(input.bufferFactor ?? 0),
     restDays: uniqueSorted(input.restDays),
     unavailableDates: uniqueSortedStrings(input.unavailableDates),
     timeWindows: input.timeWindows

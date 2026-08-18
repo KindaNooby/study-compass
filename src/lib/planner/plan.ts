@@ -184,6 +184,7 @@ export type PrereqExplanation = {
 
 export type CapacityExplanation = {
   configuredCap: number;
+  bufferFactor: number;
   observedPerDay: number | null;
   effectiveMinutes: number;
   evidenceSessions: number;
@@ -313,7 +314,10 @@ export function effectiveDailyMinutes(
   capacity: ObservedCapacity,
 ): number {
   if (!isStudyDay(dateKey, availability)) return 0;
-  const planned = availability.maxDailyStudyMinutes;
+  // The buffer holds back a fraction of the stated cap as slack, so the planner
+  // never books the student to 100% of their declared availability.
+  const buffer = clamp01(availability.bufferFactor ?? 0);
+  const planned = Math.round(availability.maxDailyStudyMinutes * (1 - buffer));
   const observed = capacity.averageCompletedMinutesPerDay;
   if (observed === null) return planned;
   const evidence = clamp01(capacity.completedSessions / 5);
@@ -1084,6 +1088,7 @@ export function explainActivity(input: {
     prereqs = { unlocked, missingIds, missingTitles };
   }
 
+  const bufferFactor = clamp01(state.availability.bufferFactor ?? 0);
   const configuredCap = state.availability.maxDailyStudyMinutes;
   const observedPerDay = capacity.averageCompletedMinutesPerDay;
   const effectiveMinutes = effectiveDailyMinutes(target.date, state.availability, capacity);
@@ -1114,6 +1119,8 @@ export function explainActivity(input: {
   }
   reasons.push(
     `${effectiveMinutes} min effective capacity this day — configured ${configuredCap} min${
+      bufferFactor > 0 ? `, ${Math.round(bufferFactor * 100)}% buffer` : ""
+    }${
       observedPerDay === null
         ? ", no observed pace yet"
         : `, observed ${Math.round(observedPerDay)} min`
@@ -1130,6 +1137,7 @@ export function explainActivity(input: {
     prereqs,
     capacity: {
       configuredCap,
+      bufferFactor,
       observedPerDay,
       effectiveMinutes,
       evidenceSessions: capacity.completedSessions,
@@ -1259,6 +1267,104 @@ export function projectRoadmap(state: PlanState): Roadmap {
     milestones,
     blockedObjectives: plan.blockedObjectives,
     warnings: plan.warnings,
+  };
+}
+
+// --- Recovery ---
+
+export type RecoveryOptionKind = "add_time" | "move_exam";
+
+export type RecoveryOption = {
+  kind: RecoveryOptionKind;
+  label: string;
+  /** add_time: extra minutes per study day; move_exam: days to shift. */
+  value: number;
+};
+
+export type RecoveryPlan = {
+  behind: boolean;
+  shortfallMinutes: number;
+  requiredMinutes: number;
+  availableMinutes: number;
+  daysToExam: number | null;
+  extraMinutesPerStudyDay: number | null;
+  requiredExamDate: string | null;
+  options: RecoveryOption[];
+};
+
+/**
+ * When the required work cannot fit the remaining time, this turns the honest
+ * shortfall into two concrete, non-punitive choices: how many extra minutes per
+ * study day would close the gap, and what exam date the current pace could
+ * actually reach. It reuses the plan's feasibility math so the numbers always
+ * match what the student sees elsewhere.
+ */
+export function recoveryPlan(state: PlanState): RecoveryPlan {
+  const plan = planStudy(state);
+  const ctx = computeWorkContext(state);
+  const { goal, capacity } = ctx;
+  const today = plan.horizonStart;
+  const feasibility = plan.feasibility;
+  const behind = !feasibility.achievable && feasibility.shortfallMinutes > 0;
+
+  if (!goal || !behind) {
+    return {
+      behind,
+      shortfallMinutes: feasibility.shortfallMinutes,
+      requiredMinutes: feasibility.requiredMinutes,
+      availableMinutes: feasibility.availableMinutes,
+      daysToExam: goal ? daysBetween(today, goal.examDate) : null,
+      extraMinutesPerStudyDay: null,
+      requiredExamDate: null,
+      options: [],
+    };
+  }
+
+  // Study days remaining today through the exam (inclusive).
+  const totalDays = daysBetween(today, goal.examDate);
+  let studyDays = 0;
+  for (let i = 0; i <= totalDays; i++) {
+    if (effectiveDailyMinutes(addDays(today, i), state.availability, capacity) > 0) {
+      studyDays += 1;
+    }
+  }
+
+  const extraMinutesPerStudyDay =
+    studyDays > 0 ? Math.ceil(feasibility.shortfallMinutes / studyDays) : null;
+
+  // The date the work actually finishes at the current effective pace.
+  const roadmap = projectRoadmap(state);
+  const requiredExamDate = roadmap.projectedFinishDate;
+
+  const options: RecoveryOption[] = [];
+  if (extraMinutesPerStudyDay !== null) {
+    options.push({
+      kind: "add_time",
+      label: `Add ${extraMinutesPerStudyDay} min per study day`,
+      value: extraMinutesPerStudyDay,
+    });
+  }
+  if (requiredExamDate) {
+    const shift = daysBetween(goal.examDate, requiredExamDate);
+    options.push({
+      kind: "move_exam",
+      label:
+        shift > 0
+          ? `Move the exam to ${requiredExamDate} (${shift} day${shift === 1 ? "" : "s"} later)`
+          : "On track",
+      value: shift,
+    });
+  }
+
+  return {
+    behind,
+    shortfallMinutes: feasibility.shortfallMinutes,
+    requiredMinutes: feasibility.requiredMinutes,
+    availableMinutes: feasibility.availableMinutes,
+    daysToExam: totalDays,
+    extraMinutesPerStudyDay,
+    requiredExamDate,
+    options,
   };
 }
 

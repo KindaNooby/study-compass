@@ -30,6 +30,7 @@ import {
   placePlannedActivities,
   planStudy,
   projectRoadmap,
+  recoveryPlan,
   replaceActivity,
   replacementCandidates,
   saveActivity,
@@ -710,6 +711,8 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
 
   const roadmap = useMemo(() => (planState ? projectRoadmap(planState) : null), [planState]);
 
+  const recovery = useMemo(() => (planState ? recoveryPlan(planState) : null), [planState]);
+
   const explanation = useMemo(() => {
     if (!explaining || !planState) return null;
     return explainActivity({ state: planState, target: explaining });
@@ -1077,10 +1080,30 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
                     </div>
                   </div>
                   {!plan.feasibility.achievable && (
-                    <p className="mt-3 text-[11px] leading-4 text-[#8a6f2e]">
-                      Your choices: reduce optional topics, add study time, or move the exam date. The
-                      plan below schedules the highest-value work first, not everything at once.
-                    </p>
+                    <div className="mt-3">
+                      {recovery && recovery.options.length > 0 ? (
+                        <div className="rounded-[12px] bg-white/70 p-3">
+                          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#8a6f2e]">
+                            Your catch-up options
+                          </p>
+                          <ul className="mt-1.5 space-y-1">
+                            {recovery.options.map((option) => (
+                              <li key={option.kind} className="text-[11px] leading-4 text-[#8a6f2e]">
+                                {option.label}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] leading-4 text-[#8a6f2e]">
+                          Your choices: reduce optional topics, add study time, or move the exam date.
+                        </p>
+                      )}
+                      <p className="mt-2 text-[11px] leading-4 text-[#8a6f2e]">
+                        The plan below schedules the highest-value work first, not everything at
+                        once.
+                      </p>
+                    </div>
                   )}
                 </div>
 

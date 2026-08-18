@@ -712,6 +712,25 @@ function AvailabilitySection() {
           </div>
 
           <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <Label>Buffer (planned slack)</Label>
+              <span className="text-sm font-bold text-[#4562a1]">
+                {Math.round((draft.bufferFactor ?? 0) * 100)}%
+              </span>
+            </div>
+            <Slider
+              value={[(draft.bufferFactor ?? 0) * 100]}
+              min={0}
+              max={40}
+              step={5}
+              onValueChange={(values) => update({ bufferFactor: values[0] / 100 })}
+            />
+            <p className="text-xs text-muted-foreground">
+              Hold back this much of your daily limit so real life doesn't break the plan.
+            </p>
+          </div>
+
+          <div className="grid gap-2">
             <Label>Preferred study times</Label>
             <div className="flex flex-wrap gap-1.5">
               {TIME_OF_DAYS.map((time) => (

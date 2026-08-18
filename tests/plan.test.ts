@@ -9,6 +9,7 @@ import {
   nextStudyDayAfter,
   planStudy,
   projectRoadmap,
+  recoveryPlan,
   replacementCandidates,
   stableActivityKey,
   urgencyForDate,
@@ -163,6 +164,12 @@ describe("effectiveDailyMinutes", () => {
     });
     // evidence = 2/5 -> 45 * 0.4 + 120 * 0.6 = 90
     expect(effectiveDailyMinutes("2026-08-17", weekdays, capacity)).toBe(90);
+  });
+
+  test("holds back a buffer from the configured cap", () => {
+    const capacity = observeCapacity({ sessionLogs: [], attempts: [] });
+    const buffered = makeAvailability({ availableDays: [1, 2, 3, 4, 5], bufferFactor: 0.2 });
+    expect(effectiveDailyMinutes("2026-08-17", buffered, capacity)).toBe(96);
   });
 });
 
@@ -439,6 +446,40 @@ describe("projectRoadmap", () => {
     const noGoal = projectRoadmap(makeState({ objectives: [makeObjective()] }));
     expect(noGoal.onTrack).toBeNull();
     expect(noGoal.milestones).toEqual([]);
+  });
+});
+
+describe("recoveryPlan", () => {
+  test("is empty when the workload fits the remaining time", () => {
+    const state = makeState({
+      objectives: [makeObjective({ estimatedLearningMinutes: 60, estimatedPracticeMinutes: 60 })],
+      examGoals: [makeGoal({ examDate: "2026-08-30" })],
+    });
+    const recovery = recoveryPlan(state);
+    expect(recovery.behind).toBe(false);
+    expect(recovery.options).toEqual([]);
+    expect(recovery.extraMinutesPerStudyDay).toBeNull();
+    expect(recovery.requiredExamDate).toBeNull();
+  });
+
+  test("offers extra minutes per day and a moved exam date when behind", () => {
+    const state = makeState({
+      objectives: [makeObjective({ estimatedLearningMinutes: 500, estimatedPracticeMinutes: 0 })],
+      examGoals: [makeGoal({ examDate: "2026-08-19" })],
+      availability: makeAvailability({ availableDays: [0, 1, 2, 3, 4, 5, 6], maxDailyStudyMinutes: 100 }),
+    });
+    const recovery = recoveryPlan(state);
+    expect(recovery.behind).toBe(true);
+    expect(recovery.shortfallMinutes).toBe(100);
+    expect(recovery.extraMinutesPerStudyDay).toBe(25);
+    expect(recovery.requiredExamDate).toBe("2026-08-20");
+    expect(recovery.options.map((option) => option.kind)).toEqual(["add_time", "move_exam"]);
+  });
+
+  test("reports no exam date without a goal", () => {
+    const recovery = recoveryPlan(makeState({ objectives: [makeObjective()] }));
+    expect(recovery.behind).toBe(false);
+    expect(recovery.daysToExam).toBeNull();
   });
 });
 

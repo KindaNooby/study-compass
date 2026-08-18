@@ -74,6 +74,7 @@ export function emptyAvailability(): Availability {
     availableDays: [],
     timeWindows: [],
     maxDailyStudyMinutes: 0,
+    bufferFactor: 0,
     preferredSessionMinutes: 0,
     preferredStudyTimes: [],
     fixedCommitments: [],

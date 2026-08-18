@@ -97,6 +97,7 @@ export const availabilitySchema = z.object({
   availableDays: z.array(z.number().int().min(0).max(6)),
   timeWindows: z.array(timeWindowSchema),
   maxDailyStudyMinutes: z.number().int().min(0).max(1440),
+  bufferFactor: z.number().min(0).max(1).optional(),
   preferredSessionMinutes: z.number().int().min(0).max(1440),
   preferredStudyTimes: z.array(timeOfDaySchema),
   fixedCommitments: z.array(fixedCommitmentSchema),

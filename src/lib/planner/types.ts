@@ -79,6 +79,8 @@ export type Availability = {
   availableDays: number[]; // 0=Sun..6=Sat
   timeWindows: TimeWindow[];
   maxDailyStudyMinutes: number;
+  /** Fraction of the daily cap held back as slack, 0..1. */
+  bufferFactor?: number;
   preferredSessionMinutes: number;
   preferredStudyTimes: TimeOfDay[];
   fixedCommitments: FixedCommitment[];
