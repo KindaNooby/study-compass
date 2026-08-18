@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { emptyAvailability } from "../src/lib/planner/db";
 import type { PlannedActivity } from "../src/lib/planner/plan";
 import {
+  buildDayTimetable,
   DEFAULT_STUDY_WINDOW,
   minutesToTime,
   occupiedBlocksForDate,
@@ -245,5 +246,72 @@ describe("placePlannedActivities", () => {
       end: "09:30",
     });
     expect(placements.size).toBe(2);
+  });
+});
+
+describe("buildDayTimetable", () => {
+  test("places unplaced work into the first window and keeps commitments", () => {
+    const result = buildDayTimetable({
+      date: "2026-08-17", // Monday
+      activities: [{ id: "a", date: "2026-08-17", plannedMinutes: 30 }],
+      availability: availability({
+        availableDays: [1],
+        timeWindows: [{ day: 1, start: "09:00", end: "11:00" }],
+        fixedCommitments: [{ id: "c", day: 1, start: "10:00", end: "11:00", label: "Class" }],
+      }),
+    });
+
+    expect(result.isStudyDay).toBe(true);
+    expect(result.dayStart).toBe(540);
+    expect(result.dayEnd).toBe(660);
+    expect(result.entries).toEqual([
+      { start: 540, end: 570, type: "activity", activityId: "a" },
+      { start: 600, end: 660, type: "commitment", label: "Class" },
+    ]);
+    expect(result.unplaced).toEqual([]);
+    expect(result.totalMinutes).toBe(30);
+  });
+
+  test("keeps already-placed rows and reports overflow as unplaced", () => {
+    const result = buildDayTimetable({
+      date: "2026-08-17",
+      activities: [
+        { id: "a", date: "2026-08-17", plannedMinutes: 30, start: "09:00", end: "09:30" },
+        { id: "b", date: "2026-08-17", plannedMinutes: 120 },
+      ],
+      availability: availability({
+        availableDays: [1],
+        timeWindows: [{ day: 1, start: "09:00", end: "10:00" }],
+      }),
+    });
+
+    expect(result.entries).toEqual([
+      { start: 540, end: 570, type: "activity", activityId: "a" },
+    ]);
+    expect(result.unplaced).toEqual([{ activityId: "b", minutes: 120 }]);
+  });
+
+  test("flags non-study days", () => {
+    const result = buildDayTimetable({
+      date: "2026-08-17",
+      activities: [],
+      availability: availability(),
+    });
+
+    expect(result.isStudyDay).toBe(false);
+    expect(result.entries).toEqual([]);
+  });
+
+  test("counts completed minutes over planned when present", () => {
+    const result = buildDayTimetable({
+      date: "2026-08-17",
+      activities: [
+        { id: "a", date: "2026-08-17", plannedMinutes: 60, completedMinutes: 40 },
+        { id: "b", date: "2026-08-17", plannedMinutes: 30 },
+      ],
+      availability: availability({ availableDays: [1] }),
+    });
+
+    expect(result.totalMinutes).toBe(70);
   });
 });

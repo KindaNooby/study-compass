@@ -23,6 +23,17 @@ export function todayKey(now = new Date()): string {
   return toDateKey(now);
 }
 
+/** Adds whole days to a local YYYY-MM-DD key, rolling months/years correctly. */
+export function addDaysToDateKey(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return toDateKey(new Date(year, month - 1, day + days));
+}
+
+/** A rolling window of consecutive local date keys starting at `startKey`. */
+export function nextDateKeys(startKey: string, count: number): string[] {
+  return Array.from({ length: count }, (_, index) => addDaysToDateKey(startKey, index));
+}
+
 export function formatDateKey(date: string): string {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",

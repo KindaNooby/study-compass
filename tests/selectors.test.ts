@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  addDaysToDateKey,
   allPrerequisites,
   isAvailabilityConfigured,
+  nextDateKeys,
   normalizeAvailability,
   prerequisiteOrder,
   toDateKey,
@@ -14,6 +16,26 @@ describe("toDateKey", () => {
   test("formats dates with zero padding", () => {
     expect(toDateKey(new Date(2026, 7, 15))).toBe("2026-08-15");
     expect(toDateKey(new Date(2026, 0, 3))).toBe("2026-01-03");
+  });
+});
+
+describe("addDaysToDateKey", () => {
+  test("adds days and rolls over month/year boundaries", () => {
+    expect(addDaysToDateKey("2026-08-31", 1)).toBe("2026-09-01");
+    expect(addDaysToDateKey("2026-12-31", 1)).toBe("2027-01-01");
+    expect(addDaysToDateKey("2026-03-01", -1)).toBe("2026-02-28");
+    expect(addDaysToDateKey("2026-08-17", 0)).toBe("2026-08-17");
+  });
+});
+
+describe("nextDateKeys", () => {
+  test("returns a rolling window of consecutive keys", () => {
+    expect(nextDateKeys("2026-08-17", 3)).toEqual([
+      "2026-08-17",
+      "2026-08-18",
+      "2026-08-19",
+    ]);
+    expect(nextDateKeys("2026-08-17", 0)).toEqual([]);
   });
 });
 

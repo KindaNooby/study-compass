@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import {
   ACTIVITY_KIND_LABELS,
   applyPlan,
+  buildDayTimetable,
   formatDateKey,
   isAvailabilityConfigured,
   isStudyDay,
@@ -18,24 +19,19 @@ import {
   nextExam,
   occupiedBlocksForDate,
   placePlannedActivities,
-  placeTimetable,
   planStudy,
   saveActivity,
   snapActivity,
-  studyWindowsForWeekday,
-  timeToMinutes,
   todayKey,
   useActivities,
   useAvailability,
   useCurriculum,
   useExamGoals,
   useMeasurementData,
-  weekdayOfDateKey,
   WEEKDAYS,
 } from "@/lib/planner";
 import type {
   ActivityKind,
-  ActivityStatus,
   PlannedActivity,
   PlanDay,
   StudyActivity,
@@ -47,12 +43,9 @@ import {
   CalendarPlus,
   Check,
   CheckCircle2,
-  ClipboardList,
   Clock,
   Info,
-  ListChecks,
   Loader2,
-  PenLine,
   Pin,
   PinOff,
   RefreshCw,
@@ -63,63 +56,9 @@ import {
 import { Fragment, useEffect, useMemo, useState, type DragEvent } from "react";
 import { toast } from "sonner";
 
-const ACTIVITY_DND_TYPE = "application/x-study-compass-activity";
-
-function isActionableStatus(status: ActivityStatus): boolean {
-  return status !== "completed" && status !== "skipped";
-}
-
-function setActivityDrag(event: DragEvent, id: string): void {
-  event.dataTransfer.setData(ACTIVITY_DND_TYPE, id);
-  event.dataTransfer.effectAllowed = "move";
-}
-
-function draggedActivityId(event: DragEvent): string {
-  return event.dataTransfer.getData(ACTIVITY_DND_TYPE);
-}
-
-function allowActivityDrop(event: DragEvent): void {
-  if (Array.from(event.dataTransfer.types).includes(ACTIVITY_DND_TYPE)) {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  }
-}
-
-const KIND_ICONS: Record<ActivityKind, typeof BookOpen> = {
-  fsrs_review: RefreshCw,
-  learn_new_content: BookOpen,
-  retrieval_practise: RefreshCw,
-  mcq_practise: ListChecks,
-  structured_practise: PenLine,
-  error_correction: AlertTriangle,
-  mixed_exam_practice: ListChecks,
-  mock_exam: ClipboardList,
-};
-
-const STATUS_LABELS: Record<ActivityStatus, string> = {
-  planned: "Planned",
-  in_progress: "In progress",
-  completed: "Completed",
-  skipped: "Skipped",
-  missed: "Missed",
-  postponed: "Postponed",
-};
-
-function statusClass(status: ActivityStatus): string {
-  switch (status) {
-    case "completed":
-      return "bg-[#e4f3e9] text-[#276641]";
-    case "in_progress":
-      return "bg-[#e6ecff] text-[#2c4b99]";
-    case "skipped":
-    case "missed":
-      return "bg-[#fff0dc] text-[#87531b]";
-    case "postponed":
-      return "bg-[#f1ecff] text-[#5b4a94]";
-    default:
-      return "bg-[#f1f2f7] text-[#6f7079]";
-  }
-}
+import { CalendarView } from "./Calendar";
+import { allowActivityDrop, draggedActivityId, setActivityDrag } from "./dnd";
+import { isActionableStatus, KIND_ICONS, STATUS_LABELS, statusClass } from "./shared";
 
 function restoreActivity(activity: StudyActivity): StudyActivity {
   const { completedMinutes: _completedMinutes, ...rest } = activity;
@@ -389,7 +328,7 @@ function ScheduleActivityRow({
   );
 }
 
-type ScheduleView = "recommendation" | "today" | "schedule";
+type ScheduleView = "recommendation" | "calendar" | "today" | "schedule";
 
 function TodayView({
   objectiveById,
@@ -402,80 +341,14 @@ function TodayView({
   const { availability } = useAvailability();
   const today = todayKey();
 
-  const model = useMemo(() => {
-    if (!availability) return null;
-    const weekday = weekdayOfDateKey(today);
-    const studyDay = isStudyDay(today, availability);
-    const rows = activities.filter((activity) => activity.date === today);
-
-    const windows = studyWindowsForWeekday(availability, weekday);
-    const dayStart = Math.min(...windows.map((window) => timeToMinutes(window.start)));
-    const dayEnd = Math.max(...windows.map((window) => timeToMinutes(window.end)));
-
-    const commitments = availability.fixedCommitments
-      .filter((commitment) => commitment.day === weekday)
-      .map((commitment) => ({
-        start: timeToMinutes(commitment.start),
-        end: timeToMinutes(commitment.end),
-        label: commitment.label,
-      }));
-
-    const withTimes = rows.filter((activity) => activity.start && activity.end);
-    const withoutTimes = rows.filter((activity) => !activity.start || !activity.end);
-    const result = placeTimetable({
-      date: today,
-      activities: withoutTimes.map((activity) => ({
-        id: activity.id,
-        plannedMinutes: activity.plannedMinutes,
-      })),
-      availability,
-      occupied: withTimes.map((activity) => ({
-        start: activity.start as string,
-        end: activity.end as string,
-      })),
-    });
-    const byId = new Map(rows.map((activity) => [activity.id, activity]));
-
-    type Entry = {
-      start: number;
-      end: number;
-      type: "activity" | "commitment";
-      activity?: StudyActivity;
-      label?: string;
-    };
-    const entries: Entry[] = [
-      ...commitments.map((commitment) => ({
-        start: commitment.start,
-        end: commitment.end,
-        type: "commitment" as const,
-        label: commitment.label,
-      })),
-      ...withTimes.map((activity) => ({
-        start: timeToMinutes(activity.start as string),
-        end: timeToMinutes(activity.end as string),
-        type: "activity" as const,
-        activity,
-      })),
-      ...result.placed.map((block) => ({
-        start: timeToMinutes(block.start),
-        end: timeToMinutes(block.end),
-        type: "activity" as const,
-        activity: byId.get(block.activityId)!,
-      })),
-    ].sort((a, b) => a.start - b.start || a.end - b.end);
-
-    return {
-      studyDay,
-      entries,
-      unplaced: result.unplaced,
-      totalMinutes: rows.reduce(
-        (sum, activity) => sum + (activity.completedMinutes ?? activity.plannedMinutes),
-        0,
-      ),
-      dayStart,
-      dayEnd,
-    };
-  }, [activities, availability, today]);
+  const model = useMemo(
+    () => (availability ? buildDayTimetable({ date: today, activities, availability }) : null),
+    [activities, availability, today],
+  );
+  const byId = useMemo(
+    () => new Map(activities.map((activity) => [activity.id, activity])),
+    [activities],
+  );
 
   if (!availability || !model) {
     return (
@@ -536,7 +409,7 @@ function TodayView({
         </span>
       </div>
 
-      {!model.studyDay ? (
+      {!model.isStudyDay ? (
         <Card className="mt-4 rounded-[24px] border-dashed border-[#d8dae5] bg-white py-0 shadow-none">
           <CardContent className="flex min-h-[180px] flex-col items-center justify-center p-8 text-center">
             <CalendarDays className="size-8 text-[#9b9ca5]" />
@@ -578,11 +451,12 @@ function TodayView({
               {model.entries.map((entry, index) => {
                 const prev = model.entries[index - 1];
                 const gap = prev && entry.start > prev.end ? { start: prev.end, end: entry.start } : null;
-                const Icon = entry.activity ? KIND_ICONS[entry.activity.kind] : null;
-                const actionable = entry.activity ? isActionableStatus(entry.activity.status) : false;
-                const objectiveLabel = entry.activity
-                  ? entry.activity.objectiveIds.length > 0
-                    ? entry.activity.objectiveIds.map((id) => objectiveById.get(id) ?? id).join(", ")
+                const activity = entry.activityId ? byId.get(entry.activityId) : undefined;
+                const Icon = activity ? KIND_ICONS[activity.kind] : null;
+                const actionable = activity ? isActionableStatus(activity.status) : false;
+                const objectiveLabel = activity
+                  ? activity.objectiveIds.length > 0
+                    ? activity.objectiveIds.map((id) => objectiveById.get(id) ?? id).join(", ")
                     : "Whole-goal activity"
                   : "";
                 return (
@@ -615,8 +489,8 @@ function TodayView({
                       <div
                         draggable={actionable}
                         onDragStart={(event) => {
-                          if (!entry.activity || !actionable) return;
-                          setActivityDrag(event, entry.activity.id);
+                          if (!activity || !actionable) return;
+                          setActivityDrag(event, activity.id);
                         }}
                         data-time-start={entry.start}
                         data-time-end={entry.end}
@@ -627,13 +501,13 @@ function TodayView({
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#5a6a94]">
                             {Icon && <Icon className="size-3.5 text-[#5871ae]" />}
-                            {ACTIVITY_KIND_LABELS[entry.activity!.kind]}
+                            {ACTIVITY_KIND_LABELS[activity!.kind]}
                           </div>
                           <p className="mt-1 truncate text-sm font-semibold text-[#3a3b45]">{objectiveLabel}</p>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                          <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${statusClass(entry.activity!.status)}`}>
-                            {STATUS_LABELS[entry.activity!.status]}
+                          <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${statusClass(activity!.status)}`}>
+                            {STATUS_LABELS[activity!.status]}
                           </span>
                           <span className="text-xs font-bold text-[#3a3b45]">
                             {minutesToTime(entry.start)}–{minutesToTime(entry.end)}
@@ -907,7 +781,7 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
       </section>
 
       <div className="mt-6 flex w-fit rounded-full bg-[#f1f2f7] p-1">
-        {(["recommendation", "today", "schedule"] as const).map((value) => (
+        {(["recommendation", "calendar", "today", "schedule"] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -916,7 +790,13 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
               view === value ? "bg-[#e1e8ff] text-[#244a9c]" : "text-[#777883]"
             }`}
           >
-            {value === "recommendation" ? "Recommendation" : value === "today" ? "Today" : "My schedule"}
+            {value === "recommendation"
+              ? "Recommendation"
+              : value === "calendar"
+                ? "Calendar"
+                : value === "today"
+                  ? "Today"
+                  : "My schedule"}
           </button>
         ))}
       </div>
@@ -1150,6 +1030,8 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
             </section>
           )}
         </>
+      ) : view === "calendar" ? (
+        <CalendarView objectiveById={objectiveById} onNavigate={onNavigate} />
       ) : view === "today" ? (
         <TodayView objectiveById={objectiveById} onNavigate={onNavigate} />
       ) : (

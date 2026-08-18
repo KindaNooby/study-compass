@@ -1,5 +1,5 @@
 import { weekdayOfDateKey } from "./measurement";
-import { stableActivityKey, type PlannedActivity } from "./plan";
+import { isStudyDay, stableActivityKey, type PlannedActivity } from "./plan";
 import type { Availability, TimeOfDay } from "./types";
 
 /**
@@ -257,4 +257,109 @@ export function occupiedBlocksForDate(
         activity.start !== undefined && activity.end !== undefined,
     )
     .map((activity) => ({ start: activity.start, end: activity.end }));
+}
+
+/** Minimal activity shape needed to project a day onto clock slots. */
+export type TimetableActivityInput = {
+  id: string;
+  date: string;
+  plannedMinutes: number;
+  completedMinutes?: number;
+  start?: string;
+  end?: string;
+};
+
+export type TimetableEntry = {
+  /** Minutes since midnight, inclusive start and exclusive end. */
+  start: number;
+  end: number;
+  type: "activity" | "commitment";
+  activityId?: string;
+  label?: string;
+};
+
+export type DayTimetable = {
+  date: string;
+  weekday: number;
+  isStudyDay: boolean;
+  /** First/last minute of the day's study windows (the draggable span). */
+  dayStart: number;
+  dayEnd: number;
+  entries: TimetableEntry[];
+  unplaced: { activityId: string; minutes: number }[];
+  totalMinutes: number;
+};
+
+/**
+ * Projects one date onto clock slots: explicit time windows minus fixed
+ * commitments, with already-placed rows kept where they are and unplaced rows
+ * packed into the remaining free gaps. Pure and deterministic; both the Today
+ * agenda and the week calendar render from this single source of truth.
+ */
+export function buildDayTimetable(input: {
+  date: string;
+  activities: TimetableActivityInput[];
+  availability: Availability;
+}): DayTimetable {
+  const weekday = weekdayOfDateKey(input.date);
+  const studyDay = isStudyDay(input.date, input.availability);
+  const rows = input.activities.filter((activity) => activity.date === input.date);
+
+  const windows = studyWindowsForWeekday(input.availability, weekday);
+  const dayStart = Math.min(...windows.map((window) => timeToMinutes(window.start)));
+  const dayEnd = Math.max(...windows.map((window) => timeToMinutes(window.end)));
+
+  const commitments: TimetableEntry[] = input.availability.fixedCommitments
+    .filter((commitment) => commitment.day === weekday)
+    .map((commitment) => ({
+      start: timeToMinutes(commitment.start),
+      end: timeToMinutes(commitment.end),
+      type: "commitment" as const,
+      label: commitment.label,
+    }));
+
+  const withTimes = rows.filter((activity) => activity.start && activity.end);
+  const withoutTimes = rows.filter((activity) => !activity.start || !activity.end);
+  const result = placeTimetable({
+    date: input.date,
+    activities: withoutTimes.map((activity) => ({
+      id: activity.id,
+      plannedMinutes: activity.plannedMinutes,
+    })),
+    availability: input.availability,
+    occupied: withTimes.map((activity) => ({
+      start: activity.start as string,
+      end: activity.end as string,
+    })),
+  });
+
+  const entries: TimetableEntry[] = [
+    ...commitments,
+    ...withTimes.map((activity) => ({
+      start: timeToMinutes(activity.start as string),
+      end: timeToMinutes(activity.end as string),
+      type: "activity" as const,
+      activityId: activity.id,
+    })),
+    ...result.placed.map((block) => ({
+      start: timeToMinutes(block.start),
+      end: timeToMinutes(block.end),
+      type: "activity" as const,
+      activityId: block.activityId,
+    })),
+  ].sort((a, b) => a.start - b.start || a.end - b.end);
+
+  return {
+    date: input.date,
+    weekday,
+    isStudyDay: studyDay,
+    dayStart,
+    dayEnd,
+    entries,
+    unplaced: result.unplaced,
+    totalMinutes: rows.reduce(
+      (sum, activity) => sum + (activity.completedMinutes ?? activity.plannedMinutes),
+      0,
+    ),
+  };
 }
