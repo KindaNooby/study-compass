@@ -99,6 +99,28 @@ async function deleteMeasurementForObjectives(objectiveIds: string[]): Promise<v
   ]);
 }
 
+/**
+ * Drops deleted objectives from the schedule so no orphaned rows survive a
+ * curriculum deletion. Single-objective rows (learning/practice) are deleted
+ * outright; multi-objective rows (reviews, mocks) keep their other objectives.
+ * Session logs are left as append-only history so capacity is never erased.
+ */
+async function cleanActivitiesForObjectives(objectiveIds: string[]): Promise<void> {
+  if (objectiveIds.length === 0) return;
+  const removed = new Set(objectiveIds);
+  const activities = await db.activities.toArray();
+  const toDelete: string[] = [];
+  const toUpdate: StudyActivity[] = [];
+  for (const activity of activities) {
+    if (!activity.objectiveIds.some((id) => removed.has(id))) continue;
+    const nextObjectiveIds = activity.objectiveIds.filter((id) => !removed.has(id));
+    if (nextObjectiveIds.length === 0) toDelete.push(activity.id);
+    else toUpdate.push({ ...activity, objectiveIds: nextObjectiveIds });
+  }
+  if (toDelete.length > 0) await db.activities.bulkDelete(toDelete);
+  if (toUpdate.length > 0) await db.activities.bulkPut(toUpdate);
+}
+
 async function removePrerequisiteReferences(objectiveIds: string[]): Promise<void> {
   if (objectiveIds.length === 0) return;
   const removed = new Set(objectiveIds);
@@ -160,6 +182,7 @@ export async function deleteSubject(subjectId: string): Promise<void> {
       db.questions,
       db.reviewLogs,
       db.practiceAttempts,
+      db.activities,
     ],
     async () => {
       const topicIds = (await db.topics.where("subjectId").equals(subjectId).toArray()).map(
@@ -175,6 +198,7 @@ export async function deleteSubject(subjectId: string): Promise<void> {
       await db.subjects.delete(subjectId);
 
       await deleteMeasurementForObjectives(objectiveIds);
+      await cleanActivitiesForObjectives(objectiveIds);
       await removePrerequisiteReferences(objectiveIds);
       await cleanGoalsForRemoved({ subjectId, topicIds });
     },
@@ -193,6 +217,7 @@ export async function deleteUnit(unitId: string): Promise<void> {
       db.questions,
       db.reviewLogs,
       db.practiceAttempts,
+      db.activities,
     ],
     async () => {
       const topics = await db.topics.where("unitId").equals(unitId).toArray();
@@ -208,6 +233,7 @@ export async function deleteUnit(unitId: string): Promise<void> {
       await db.units.delete(unitId);
 
       await deleteMeasurementForObjectives(objectiveIds);
+      await cleanActivitiesForObjectives(objectiveIds);
       await removePrerequisiteReferences(objectiveIds);
       await cleanGoalsForRemoved({ topicIds });
     },
@@ -225,6 +251,7 @@ export async function deleteTopic(topicId: string): Promise<void> {
       db.questions,
       db.reviewLogs,
       db.practiceAttempts,
+      db.activities,
     ],
     async () => {
       const objectiveIds = (await db.objectives.where("topicId").equals(topicId).toArray()).map(
@@ -234,6 +261,7 @@ export async function deleteTopic(topicId: string): Promise<void> {
       await db.topics.delete(topicId);
 
       await deleteMeasurementForObjectives(objectiveIds);
+      await cleanActivitiesForObjectives(objectiveIds);
       await removePrerequisiteReferences(objectiveIds);
       await cleanGoalsForRemoved({ topicIds: [topicId] });
     },
@@ -243,10 +271,11 @@ export async function deleteTopic(topicId: string): Promise<void> {
 export async function deleteObjective(objectiveId: string): Promise<void> {
   await db.transaction(
     "rw",
-    [db.objectives, db.cards, db.questions, db.reviewLogs, db.practiceAttempts],
+    [db.objectives, db.cards, db.questions, db.reviewLogs, db.practiceAttempts, db.activities],
     async () => {
       await db.objectives.delete(objectiveId);
       await deleteMeasurementForObjectives([objectiveId]);
+      await cleanActivitiesForObjectives([objectiveId]);
       await removePrerequisiteReferences([objectiveId]);
     },
   );
