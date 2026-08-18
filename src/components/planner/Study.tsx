@@ -14,7 +14,6 @@ import {
   addSessionLog,
   closePlannedActivity,
   formatDateKey,
-  isDue,
   isDueByDay,
   reviewCard,
   todayKey,

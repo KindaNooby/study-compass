@@ -562,7 +562,6 @@ function subjectForObjectives(
 }
 
 function questionCountFor(
-  kind: ActivityKind,
   questionType: QuestionType | undefined,
   minutes: number,
   capacity: ObservedCapacity,
@@ -856,7 +855,7 @@ export function planStudy(state: PlanState): Plan {
       return sum + learning + practice;
     }, 0);
   const reviewMinutes = dueForecast.reduce((sum, point) => sum + point.minutes, 0);
-  const mockMinutes = mocks.reduce((sum, mock) => sum + MOCK_EXAM_MINUTES, 0);
+  const mockMinutes = mocks.reduce((sum) => sum + MOCK_EXAM_MINUTES, 0);
   const requiredMinutes = requiredWorkMinutes + reviewMinutes + mockMinutes;
 
   let availableMinutes = 0;
@@ -972,7 +971,7 @@ export function planStudy(state: PlanState): Plan {
         examGoalId: goal?.id,
         questionType: best.candidate.questionType,
         plannedMinutes: take,
-        questionCount: questionCountFor(best.candidate.kind, best.candidate.questionType, take, capacity),
+        questionCount: questionCountFor(best.candidate.questionType, take, capacity),
         purpose: best.candidate.purpose,
         score: round2(best.item.priority.score),
         reasons: best.candidate.reasons,

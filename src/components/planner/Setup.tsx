@@ -16,7 +16,6 @@ import { Slider } from "@/components/ui/slider";
 import {
   createExamGoal,
   deleteExamGoal,
-  emptyAvailability,
   formatDateKey,
   isAvailabilityConfigured,
   normalizeAvailability,
@@ -38,8 +37,6 @@ import type {
 } from "@/lib/planner";
 import { TIME_OF_DAY_LABELS, WEEKDAYS } from "@/lib/planner";
 import {
-  CalendarClock,
-  Gauge,
   Loader2,
   Pencil,
   Plus,
