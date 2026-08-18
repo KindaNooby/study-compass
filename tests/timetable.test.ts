@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import { emptyAvailability } from "../src/lib/planner/db";
+import type { PlannedActivity } from "../src/lib/planner/plan";
 import {
   DEFAULT_STUDY_WINDOW,
   minutesToTime,
+  placePlannedActivities,
   placeTimetable,
   studyWindowsForWeekday,
   timeToMinutes,
@@ -104,5 +106,56 @@ describe("placeTimetable", () => {
       }),
     });
     expect(result.free).toEqual([{ start: "09:30", end: "11:00" }]);
+  });
+
+  test("treats occupied blocks as already taken", () => {
+    const result = placeTimetable({
+      date: "2026-08-17",
+      activities: [{ id: "b", plannedMinutes: 30 }],
+      availability: availability({
+        timeWindows: [{ day: 1, start: "09:00", end: "11:00" }],
+      }),
+      occupied: [{ start: "09:00", end: "09:30" }],
+    });
+    expect(result.placed).toEqual([
+      { activityId: "b", start: "09:30", end: "10:00", placedMinutes: 30 },
+    ]);
+  });
+});
+
+describe("placePlannedActivities", () => {
+  test("returns clock placements keyed by stable activity key", () => {
+    const planned: PlannedActivity[] = [
+      {
+        date: "2026-08-17",
+        kind: "learn_new_content",
+        objectiveIds: ["o1"],
+        subjectId: "s1",
+        plannedMinutes: 30,
+        purpose: "learning",
+        score: 0.8,
+        reasons: ["test"],
+      },
+      {
+        date: "2026-08-17",
+        kind: "mcq_practise",
+        objectiveIds: ["o1"],
+        subjectId: "s1",
+        questionType: "mcq",
+        plannedMinutes: 30,
+        purpose: "application",
+        score: 0.7,
+        reasons: ["test"],
+      },
+    ];
+    const placements = placePlannedActivities(
+      planned,
+      availability({ timeWindows: [{ day: 1, start: "09:00", end: "10:00" }] }),
+    );
+    expect(placements.get("2026-08-17|learn_new_content|s1|o1")).toEqual({
+      start: "09:00",
+      end: "09:30",
+    });
+    expect(placements.size).toBe(2);
   });
 });

@@ -1,4 +1,5 @@
 import { weekdayOfDateKey } from "./measurement";
+import { stableActivityKey, type PlannedActivity } from "./plan";
 import type { Availability, TimeOfDay } from "./types";
 
 /**
@@ -133,9 +134,15 @@ export function placeTimetable(input: {
   date: string;
   activities: { id: string; plannedMinutes: number }[];
   availability: Availability;
+  /** Extra blocks already taken on this date, e.g. previously placed rows. */
+  occupied?: { start: string; end: string }[];
 }): TimetableResult {
   const weekday = weekdayOfDateKey(input.date);
-  const free = freeRangesForWeekday(input.availability, weekday);
+  const occupiedRanges = (input.occupied ?? []).map((block) => ({
+    start: timeToMinutes(block.start),
+    end: timeToMinutes(block.end),
+  }));
+  const free = subtractRanges(freeRangesForWeekday(input.availability, weekday), occupiedRanges);
 
   const placed: PlacedBlock[] = [];
   const unplaced: UnplacedBlock[] = [];
@@ -165,4 +172,38 @@ export function placeTimetable(input: {
     .map((range) => ({ start: minutesToTime(range.start), end: minutesToTime(range.end) }));
 
   return { placed, unplaced, free: remaining };
+}
+
+/**
+ * Places a derived plan's activities into clock slots, keyed by stable activity
+ * key so `applyPlan` can attach the times to the rows it materializes. Days are
+ * placed independently; within a day the input order (reviews → mocks → work by
+ * score) is preserved.
+ */
+export function placePlannedActivities(
+  planned: PlannedActivity[],
+  availability: Availability,
+): Map<string, { start: string; end: string }> {
+  const byDate = new Map<string, PlannedActivity[]>();
+  for (const item of planned) {
+    const list = byDate.get(item.date) ?? [];
+    list.push(item);
+    byDate.set(item.date, list);
+  }
+
+  const placements = new Map<string, { start: string; end: string }>();
+  for (const [date, items] of byDate) {
+    const result = placeTimetable({
+      date,
+      activities: items.map((item) => ({
+        id: stableActivityKey(item),
+        plannedMinutes: item.plannedMinutes,
+      })),
+      availability,
+    });
+    for (const block of result.placed) {
+      placements.set(block.activityId, { start: block.start, end: block.end });
+    }
+  }
+  return placements;
 }

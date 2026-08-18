@@ -12,15 +12,21 @@ import {
   applyPlan,
   formatDateKey,
   isAvailabilityConfigured,
+  isStudyDay,
+  minutesToTime,
   nextExam,
+  placePlannedActivities,
+  placeTimetable,
   planStudy,
   saveActivity,
+  timeToMinutes,
   todayKey,
   useActivities,
   useAvailability,
   useCurriculum,
   useExamGoals,
   useMeasurementData,
+  weekdayOfDateKey,
   WEEKDAYS,
 } from "@/lib/planner";
 import type {
@@ -38,6 +44,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardList,
+  Clock,
   Info,
   ListChecks,
   Loader2,
@@ -49,7 +56,7 @@ import {
   Target,
   Undo2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 const KIND_ICONS: Record<ActivityKind, typeof BookOpen> = {
@@ -347,7 +354,205 @@ function ScheduleActivityRow({
   );
 }
 
-type ScheduleView = "recommendation" | "schedule";
+type ScheduleView = "recommendation" | "today" | "schedule";
+
+function TodayView({
+  objectiveById,
+  onNavigate,
+}: {
+  objectiveById: Map<string, string>;
+  onNavigate: (view: "setup" | "study") => void;
+}) {
+  const { data: activities } = useActivities();
+  const { availability } = useAvailability();
+  const today = todayKey();
+
+  const model = useMemo(() => {
+    if (!availability) return null;
+    const weekday = weekdayOfDateKey(today);
+    const studyDay = isStudyDay(today, availability);
+    const rows = activities.filter((activity) => activity.date === today);
+
+    const commitments = availability.fixedCommitments
+      .filter((commitment) => commitment.day === weekday)
+      .map((commitment) => ({
+        start: timeToMinutes(commitment.start),
+        end: timeToMinutes(commitment.end),
+        label: commitment.label,
+      }));
+
+    const withTimes = rows.filter((activity) => activity.start && activity.end);
+    const withoutTimes = rows.filter((activity) => !activity.start || !activity.end);
+    const result = placeTimetable({
+      date: today,
+      activities: withoutTimes.map((activity) => ({
+        id: activity.id,
+        plannedMinutes: activity.plannedMinutes,
+      })),
+      availability,
+      occupied: withTimes.map((activity) => ({
+        start: activity.start as string,
+        end: activity.end as string,
+      })),
+    });
+    const byId = new Map(rows.map((activity) => [activity.id, activity]));
+
+    type Entry = {
+      start: number;
+      end: number;
+      type: "activity" | "commitment";
+      activity?: StudyActivity;
+      label?: string;
+    };
+    const entries: Entry[] = [
+      ...commitments.map((commitment) => ({
+        start: commitment.start,
+        end: commitment.end,
+        type: "commitment" as const,
+        label: commitment.label,
+      })),
+      ...withTimes.map((activity) => ({
+        start: timeToMinutes(activity.start as string),
+        end: timeToMinutes(activity.end as string),
+        type: "activity" as const,
+        activity,
+      })),
+      ...result.placed.map((block) => ({
+        start: timeToMinutes(block.start),
+        end: timeToMinutes(block.end),
+        type: "activity" as const,
+        activity: byId.get(block.activityId)!,
+      })),
+    ].sort((a, b) => a.start - b.start || a.end - b.end);
+
+    return {
+      studyDay,
+      entries,
+      unplaced: result.unplaced,
+      totalMinutes: rows.reduce(
+        (sum, activity) => sum + (activity.completedMinutes ?? activity.plannedMinutes),
+        0,
+      ),
+    };
+  }, [activities, availability, today]);
+
+  if (!availability || !model) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <section className="mt-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-[18px] font-bold tracking-[-0.02em] text-[#2c2d36]">Today</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {formatDateKey(today)} · your schedule in clock time.
+          </p>
+        </div>
+        <span className="rounded-full bg-[#e6ecff] px-3 py-1 text-[11px] font-bold text-[#2c4b99]">
+          {model.totalMinutes} min planned
+        </span>
+      </div>
+
+      {!model.studyDay ? (
+        <Card className="mt-4 rounded-[24px] border-dashed border-[#d8dae5] bg-white py-0 shadow-none">
+          <CardContent className="flex min-h-[180px] flex-col items-center justify-center p-8 text-center">
+            <CalendarDays className="size-8 text-[#9b9ca5]" />
+            <p className="mt-3 text-sm font-bold text-[#3a3b45]">Rest day — nothing scheduled.</p>
+            <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+              Today isn't a study day in your availability. Your next plan will skip it.
+            </p>
+          </CardContent>
+        </Card>
+      ) : model.entries.length === 0 ? (
+        <Card className="mt-4 rounded-[24px] border-dashed border-[#d8dae5] bg-white py-0 shadow-none">
+          <CardContent className="flex min-h-[180px] flex-col items-center justify-center p-8 text-center">
+            <CalendarDays className="size-8 text-[#9b9ca5]" />
+            <p className="mt-3 text-sm font-bold text-[#3a3b45]">Nothing scheduled today.</p>
+            <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+              Apply a plan from the Recommendation tab, then your work will appear here as clock
+              slots.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-4 rounded-full"
+              onClick={() => onNavigate("study")}
+            >
+              Study now
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="mt-4 rounded-[24px] border-[#e3e4eb] bg-white py-0 shadow-[0_7px_20px_rgba(39,41,57,0.03)]">
+          <CardContent className="p-5">
+            <div className="space-y-1.5">
+              {model.entries.map((entry, index) => {
+                const prev = model.entries[index - 1];
+                const gap = prev && entry.start > prev.end ? { start: prev.end, end: entry.start } : null;
+                const Icon = entry.activity ? KIND_ICONS[entry.activity.kind] : null;
+                const objectiveLabel = entry.activity
+                  ? entry.activity.objectiveIds.length > 0
+                    ? entry.activity.objectiveIds.map((id) => objectiveById.get(id) ?? id).join(", ")
+                    : "Whole-goal activity"
+                  : "";
+                return (
+                  <Fragment key={index}>
+                    {gap && (
+                      <div className="flex items-center gap-2 px-2 py-1 text-[11px] font-medium text-[#a0a1ab]">
+                        <span className="h-px flex-1 bg-[#ececf1]" />
+                        {minutesToTime(gap.start)}–{minutesToTime(gap.end)} free
+                      </div>
+                    )}
+                    {entry.type === "commitment" ? (
+                      <div className="flex items-center justify-between rounded-[14px] border border-[#f0e3c2] bg-[#fff8ea] px-3 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <Clock className="size-3.5 text-[#a97a1f]" />
+                          <span className="text-xs font-bold text-[#7a5a16]">Busy · {entry.label}</span>
+                        </div>
+                        <span className="text-[11px] font-semibold text-[#8a6f2e]">
+                          {minutesToTime(entry.start)}–{minutesToTime(entry.end)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3 rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] px-3 py-2.5">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#5a6a94]">
+                            {Icon && <Icon className="size-3.5 text-[#5871ae]" />}
+                            {ACTIVITY_KIND_LABELS[entry.activity!.kind]}
+                          </div>
+                          <p className="mt-1 truncate text-sm font-semibold text-[#3a3b45]">{objectiveLabel}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${statusClass(entry.activity!.status)}`}>
+                            {STATUS_LABELS[entry.activity!.status]}
+                          </span>
+                          <span className="text-xs font-bold text-[#3a3b45]">
+                            {minutesToTime(entry.start)}–{minutesToTime(entry.end)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </div>
+            {model.unplaced.length > 0 && (
+              <p className="mt-3 rounded-[12px] border border-[#fff0dc] bg-[#fff8ea] px-3 py-2 text-[11px] font-semibold text-[#87531b]">
+                {model.unplaced.length} activit{model.unplaced.length === 1 ? "y" : "ies"} don't fit
+                today's windows — widen a window or split the work.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </section>
+  );
+}
 
 export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => void }) {
   const curriculum = useCurriculum();
@@ -491,13 +696,14 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
     .reduce((sum, point) => sum + point.cardCount, 0);
 
   const handleApply = async () => {
-    if (!plan) return;
+    if (!plan || !availability) return;
     setApplying(true);
     try {
       const lastDay = plan.days[plan.days.length - 1];
-      await applyPlan(flatActivities, { start: plan.horizonStart, end: lastDay.date });
+      const placements = placePlannedActivities(flatActivities, availability);
+      await applyPlan(flatActivities, { start: plan.horizonStart, end: lastDay.date }, placements);
       setApplied(true);
-      setView("schedule");
+      setView("today");
       toast.success("Plan applied to your schedule");
     } catch {
       toast.error("Could not apply the plan. Try again.");
@@ -565,7 +771,7 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
       </section>
 
       <div className="mt-6 flex w-fit rounded-full bg-[#f1f2f7] p-1">
-        {(["recommendation", "schedule"] as const).map((value) => (
+        {(["recommendation", "today", "schedule"] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -574,7 +780,7 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
               view === value ? "bg-[#e1e8ff] text-[#244a9c]" : "text-[#777883]"
             }`}
           >
-            {value === "recommendation" ? "Recommendation" : "My schedule"}
+            {value === "recommendation" ? "Recommendation" : value === "today" ? "Today" : "My schedule"}
           </button>
         ))}
       </div>
@@ -808,6 +1014,8 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
             </section>
           )}
         </>
+      ) : view === "today" ? (
+        <TodayView objectiveById={objectiveById} onNavigate={onNavigate} />
       ) : (
         <section className="mt-6">
           <div className="flex flex-wrap items-end justify-between gap-3">

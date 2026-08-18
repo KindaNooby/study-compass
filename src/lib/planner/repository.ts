@@ -394,10 +394,13 @@ export async function closePlannedActivity(input: {
  * - Existing matching rows keep their status and refresh plan fields.
  * - Stale planner rows in the range that the student hasn't started are removed.
  * - `in_progress` / `completed` work is never deleted, and manual rows are untouched.
+ * - Clock placements (keyed by stable activity key) are attached to new rows and
+ *   refreshed on still-planned rows.
  */
 export async function applyPlan(
   planned: PlannedActivity[],
   range: { start: string; end: string },
+  placements: Map<string, { start: string; end: string }> = new Map(),
 ): Promise<void> {
   const existing = (
     await db.activities.where("date").between(range.start, range.end, true, true).toArray()
@@ -420,6 +423,7 @@ export async function applyPlan(
   for (const item of planned) {
     const key = stableActivityKey(item);
     const current = existingByKey.get(key);
+    const placement = placements.get(key);
     if (current) {
       // A pinned row is a student lock: keep its date, minutes, and status as-is.
       if (current.pinned) continue;
@@ -431,6 +435,8 @@ export async function applyPlan(
         cardCount: item.cardCount,
         questionType: item.questionType,
         purpose: item.purpose,
+        start: placement?.start,
+        end: placement?.end,
       });
     } else {
       toAdd.push(
@@ -448,6 +454,8 @@ export async function applyPlan(
           purpose: item.purpose,
           status: "planned",
           source: "planner",
+          start: placement?.start,
+          end: placement?.end,
         }),
       );
     }

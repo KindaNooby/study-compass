@@ -129,6 +129,9 @@ export type StudyActivity = {
   source: "planner" | "manual";
   /** Student lock: the planner keeps this where it is instead of reallocating it. */
   pinned?: boolean;
+  /** Clock placement on `date`, assigned by the timetable (phase 4). */
+  start?: string; // HH:MM
+  end?: string; // HH:MM
 };
 
 export type Curriculum = {
