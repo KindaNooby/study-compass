@@ -8,6 +8,13 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ACTIVITY_KIND_LABELS,
   applyPlan,
   buildDayTimetable,
@@ -17,11 +24,15 @@ import {
   minutesToTime,
   moveActivity,
   nextExam,
+  nextStudyDayAfter,
   occupiedBlocksForDate,
   placePlannedActivities,
   planStudy,
+  replaceActivity,
+  replacementCandidates,
   saveActivity,
   snapActivity,
+  snoozeActivity,
   todayKey,
   useActivities,
   useAvailability,
@@ -34,10 +45,12 @@ import type {
   ActivityKind,
   PlannedActivity,
   PlanDay,
+  ReplacementCandidate,
   StudyActivity,
 } from "@/lib/planner";
 import {
   AlertTriangle,
+  ArrowRightLeft,
   BookOpen,
   CalendarDays,
   CalendarPlus,
@@ -46,6 +59,7 @@ import {
   Clock,
   Info,
   Loader2,
+  Moon,
   Pin,
   PinOff,
   RefreshCw,
@@ -197,10 +211,14 @@ function ScheduleActivityRow({
   activity,
   objectiveById,
   onSave,
+  onSnooze,
+  onReplace,
 }: {
   activity: StudyActivity;
   objectiveById: Map<string, string>;
   onSave: (activity: StudyActivity) => void;
+  onSnooze: (activity: StudyActivity) => void;
+  onReplace: (activity: StudyActivity) => void;
 }) {
   const [rescheduling, setRescheduling] = useState(false);
   const Icon = KIND_ICONS[activity.kind];
@@ -213,6 +231,10 @@ function ScheduleActivityRow({
     activity.status === "postponed" ||
     activity.status === "missed" ||
     activity.status === "in_progress";
+  const replaceable =
+    activity.objectiveIds.length === 1 &&
+    activity.kind !== "fsrs_review" &&
+    activity.kind !== "mock_exam";
 
   return (
     <div
@@ -312,6 +334,22 @@ function ScheduleActivityRow({
               >
                 <CalendarPlus className="size-3" /> Move
               </button>
+              <button
+                type="button"
+                onClick={() => onSnooze(activity)}
+                className="cursor-pointer inline-flex items-center gap-1 rounded-full border border-[#e3e4eb] px-2.5 py-1 text-[11px] font-bold text-[#5a5b68] hover:bg-[#f4f5fa]"
+              >
+                <Moon className="size-3" /> Snooze
+              </button>
+              {replaceable && (
+                <button
+                  type="button"
+                  onClick={() => onReplace(activity)}
+                  className="cursor-pointer inline-flex items-center gap-1 rounded-full border border-[#e3e4eb] px-2.5 py-1 text-[11px] font-bold text-[#5a5b68] hover:bg-[#f4f5fa]"
+                >
+                  <ArrowRightLeft className="size-3" /> Replace
+                </button>
+              )}
             </>
           ) : (
             <button
@@ -542,6 +580,7 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
   const [applied, setApplied] = useState(false);
   const [view, setView] = useState<ScheduleView>("recommendation");
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
+  const [replacing, setReplacing] = useState<StudyActivity | null>(null);
 
   const [today, setToday] = useState(() => todayKey());
   useEffect(() => {
@@ -673,6 +712,38 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
     .slice(0, plan.days.length)
     .reduce((sum, point) => sum + point.cardCount, 0);
 
+  const replacementOptions = useMemo(() => {
+    if (!replacing || !availability) return [];
+    return replacementCandidates({
+      state: {
+        objectives: curriculum.objectives,
+        cards: measurement.cards,
+        attempts: measurement.attempts,
+        reviewLogs: measurement.reviewLogs,
+        sessionLogs: measurement.sessionLogs,
+        examGoals: goals,
+        activeGoalId: activeGoal?.id,
+        activities,
+        availability,
+        now,
+      },
+      current: { kind: replacing.kind, objectiveIds: replacing.objectiveIds },
+      limit: 5,
+    });
+  }, [
+    replacing,
+    availability,
+    curriculum.objectives,
+    measurement.cards,
+    measurement.attempts,
+    measurement.reviewLogs,
+    measurement.sessionLogs,
+    goals,
+    activeGoal?.id,
+    activities,
+    now,
+  ]);
+
   const handleApply = async () => {
     if (!plan || !availability) return;
     setApplying(true);
@@ -730,6 +801,49 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
       toast.success(`Moved to ${formatDateKey(date)}`);
     } catch {
       toast.error("Could not move the activity. Try again.");
+    }
+  };
+
+  const handleSnooze = async (activity: StudyActivity) => {
+    if (!availability) return;
+    const target = nextStudyDayAfter(activity.date, availability);
+    if (!target) {
+      toast.error("No study day found in the next week.");
+      return;
+    }
+    const occupied = occupiedBlocksForDate(activities, target, activity.id);
+    const placement = snapActivity({
+      date: target,
+      minutes: activity.plannedMinutes,
+      requestedStart: "00:00",
+      availability,
+      occupied,
+    });
+    try {
+      await snoozeActivity(activity.id, {
+        date: target,
+        start: placement?.start,
+        end: placement?.end,
+      });
+      toast.success(`Snoozed to ${formatDateKey(target)}`);
+    } catch {
+      toast.error("Could not snooze the activity. Try again.");
+    }
+  };
+
+  const handleReplace = async (candidate: ReplacementCandidate) => {
+    if (!replacing) return;
+    try {
+      await replaceActivity(replacing.id, {
+        objectiveIds: [candidate.objectiveId],
+        subjectId: candidate.subjectId,
+        kind: candidate.kind,
+        questionType: candidate.questionType,
+      });
+      toast.success("Activity replaced");
+      setReplacing(null);
+    } catch {
+      toast.error("Could not replace the activity. Try again.");
     }
   };
 
@@ -1109,6 +1223,8 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
                             activity={activity}
                             objectiveById={objectiveById}
                             onSave={handleSaveActivity}
+                            onSnooze={handleSnooze}
+                            onReplace={setReplacing}
                           />
                         ))}
                       </div>
@@ -1125,6 +1241,50 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
           )}
         </section>
       )}
+
+      <Dialog open={replacing !== null} onOpenChange={(open) => !open && setReplacing(null)}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Replace this activity</DialogTitle>
+            <DialogDescription>
+              Swap the slot's content for the next-highest-value work. The date and time stay put.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {replacementOptions.length === 0 ? (
+              <p className="rounded-[12px] border border-dashed border-[#d8dae5] p-4 text-center text-xs text-muted-foreground">
+                No alternative work is available right now — everything else is already scheduled or
+                blocked.
+              </p>
+            ) : (
+              replacementOptions.map((candidate) => {
+                const Icon = KIND_ICONS[candidate.kind];
+                return (
+                  <button
+                    key={`${candidate.objectiveId}-${candidate.kind}`}
+                    type="button"
+                    onClick={() => handleReplace(candidate)}
+                    className="cursor-pointer flex items-start gap-3 rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] p-3 text-left hover:bg-[#f4f5fa]"
+                  >
+                    <Icon className="mt-0.5 size-4 shrink-0 text-[#5871ae]" />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-[#3a3b45]">
+                        {candidate.title}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] font-semibold text-[#5a6a94]">
+                        {ACTIVITY_KIND_LABELS[candidate.kind]}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-[#8a8b95]">
+                        {candidate.reason}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

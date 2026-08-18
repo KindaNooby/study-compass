@@ -5,7 +5,9 @@ import { observeCapacity } from "../src/lib/planner/measurement";
 import {
   effectiveDailyMinutes,
   forecastDueReviews,
+  nextStudyDayAfter,
   planStudy,
+  replacementCandidates,
   stableActivityKey,
   urgencyForDate,
   type PlanState,
@@ -177,6 +179,56 @@ describe("forecastDueReviews", () => {
     expect(forecast[0].objectiveIds).toEqual(["o1"]);
     expect(forecast[2].date).toBe("2026-08-18");
     expect(forecast[2].cardCount).toBe(1);
+  });
+});
+
+describe("nextStudyDayAfter", () => {
+  test("returns the next study day, skipping rest days", () => {
+    expect(nextStudyDayAfter("2026-08-17", makeAvailability({ availableDays: [1, 3] }))).toBe(
+      "2026-08-19",
+    );
+  });
+
+  test("returns the immediately following day when it is a study day", () => {
+    expect(nextStudyDayAfter("2026-08-17", makeAvailability({ availableDays: [1, 2] }))).toBe(
+      "2026-08-18",
+    );
+  });
+
+  test("returns null when no study day follows within a week", () => {
+    expect(nextStudyDayAfter("2026-08-17", makeAvailability({ availableDays: [] }))).toBeNull();
+  });
+});
+
+describe("replacementCandidates", () => {
+  test("ranks other objectives and excludes the current slot's work", () => {
+    const state = makeState({
+      objectives: [
+        makeObjective({ id: "o1", title: "Alpha", importance: 0.9 }),
+        makeObjective({ id: "o2", title: "Beta", importance: 0.6 }),
+        makeObjective({ id: "o3", title: "Gamma", importance: 0.3 }),
+      ],
+      examGoals: [makeGoal()],
+    });
+
+    const candidates = replacementCandidates({
+      state,
+      current: { kind: "learn_new_content", objectiveIds: ["o1"] },
+    });
+
+    expect(candidates.map((candidate) => candidate.objectiveId)).toEqual(["o2", "o3"]);
+    expect(candidates[0].kind).toBe("learn_new_content");
+  });
+
+  test("returns no candidates when nothing else is available", () => {
+    const state = makeState({
+      objectives: [makeObjective({ id: "o1" })],
+      examGoals: [makeGoal()],
+    });
+
+    expect(
+      replacementCandidates({ state, current: { kind: "learn_new_content", objectiveIds: ["o1"] } }),
+    ).toEqual([]);
   });
 });
 

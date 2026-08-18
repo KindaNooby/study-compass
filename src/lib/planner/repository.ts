@@ -17,12 +17,14 @@ import {
 } from "./schemas";
 import type {
   ActivityKind,
+  ActivityStatus,
   Availability,
   ExamGoal,
   FsrsCard,
   LearningObjective,
   PracticeAttempt,
   Question,
+  QuestionType,
   ReviewGrade,
   ReviewLog,
   SessionLog,
@@ -358,16 +360,85 @@ export async function saveActivity(activity: StudyActivity): Promise<void> {
   });
 }
 
+/** Shared persistence for a student-initiated reschedule: manual, pinned, fresh. */
+async function writeReschedule(
+  activityId: string,
+  patch: { date: string; start?: string; end?: string; status: ActivityStatus },
+): Promise<void> {
+  const activity = await db.activities.get(activityId);
+  if (!activity) return;
+  await db.activities.put(
+    studyActivitySchema.parse({
+      ...activity,
+      date: patch.date,
+      start: patch.start,
+      end: patch.end,
+      source: "manual",
+      pinned: true,
+      status: patch.status,
+      completedMinutes: undefined,
+    }),
+  );
+}
+
 /**
  * Persists a drag-and-drop reschedule. Moving a row makes it a student-owned
  * lock (`source: "manual"` + `pinned: true`) so the planner keeps it exactly
  * where the student put it instead of reallocating or deleting it on re-apply.
- * A `start`/`end` of undefined clears a clock placement (e.g. a cross-day move
- * that should be re-snapped later).
+ * A `start`/`end` of undefined clears a clock placement.
  */
 export async function moveActivity(
   activityId: string,
   target: { date: string; start?: string; end?: string },
+): Promise<void> {
+  await db.transaction("rw", db.activities, async () => {
+    await writeReschedule(activityId, { ...target, status: "planned" });
+  });
+}
+
+/**
+ * Defers an activity to a later study day. Writes a `postponed` SessionLog for
+ * the original date so the observed-capacity model learns the student's
+ * postponement pattern, then re-places the row as a manual/pinned `postponed`
+ * activity.
+ */
+export async function snoozeActivity(
+  activityId: string,
+  target: { date: string; start?: string; end?: string },
+): Promise<void> {
+  await db.transaction("rw", [db.activities, db.sessionLogs], async () => {
+    const original = await db.activities.get(activityId);
+    if (!original) return;
+    await writeReschedule(activityId, { ...target, status: "postponed" });
+    await db.sessionLogs.add(
+      sessionLogSchema.parse({
+        id: uid(),
+        date: original.date,
+        activityId: original.id,
+        kind: original.kind,
+        objectiveIds: original.objectiveIds,
+        plannedMinutes: original.plannedMinutes,
+        actualMinutes: 0,
+        status: "postponed",
+        endedAt: new Date().toISOString(),
+      }),
+    );
+  });
+}
+
+/**
+ * Swaps a scheduled slot's content in place, keeping its date and clock time.
+ * The row becomes a student-owned lock (`manual` + `pinned`) so the planner
+ * won't silently swap it back. Stale counts are cleared.
+ */
+export async function replaceActivity(
+  activityId: string,
+  replacement: {
+    objectiveIds: string[];
+    subjectId: string;
+    kind: ActivityKind;
+    questionType?: QuestionType;
+  },
 ): Promise<void> {
   await db.transaction("rw", db.activities, async () => {
     const activity = await db.activities.get(activityId);
@@ -375,13 +446,14 @@ export async function moveActivity(
     await db.activities.put(
       studyActivitySchema.parse({
         ...activity,
-        date: target.date,
-        start: target.start,
-        end: target.end,
+        objectiveIds: replacement.objectiveIds,
+        subjectId: replacement.subjectId,
+        kind: replacement.kind,
+        questionType: replacement.questionType,
+        questionCount: undefined,
+        cardCount: undefined,
         source: "manual",
         pinned: true,
-        // A reschedule is a fresh placement, never a stale outcome: dragged work
-        // returns to `planned` so missed/postponed rows don't stay mislabeled.
         status: "planned",
         completedMinutes: undefined,
       }),

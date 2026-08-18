@@ -217,6 +217,16 @@ export function isStudyDay(dateKey: string, availability: Availability): boolean
   return availability.availableDays.includes(weekday);
 }
 
+/** The first study day strictly after `dateKey`, or null if none within a week. */
+export function nextStudyDayAfter(dateKey: string, availability: Availability): string | null {
+  let cursor = addDays(dateKey, 1);
+  for (let i = 0; i < 8; i++) {
+    if (isStudyDay(cursor, availability)) return cursor;
+    cursor = addDays(cursor, 1);
+  }
+  return null;
+}
+
 /**
  * Effective minutes for one date. Honest blend: never above the stated daily
  * cap, and pulled toward the observed completed-minutes-per-day as evidence
@@ -540,29 +550,28 @@ function nextCandidate(item: WorkItem, sessionMinutes: number): Candidate | null
  * allocation with a feasibility verdict. The plan is derived, not stored
  * wholesale — only the resulting activities are materialized by the caller.
  */
-export function planStudy(state: PlanState): Plan {
-  const { now, availability, activeGoalId } = state;
+type WorkContext = {
+  goal: ExamGoal | undefined;
+  measurements: Map<string, ObjectiveMeasurement>;
+  capacity: ObservedCapacity;
+  progress: ReturnType<typeof progressAndReservationsByObjective>;
+  work: WorkItem[];
+  inScope: LearningObjective[];
+};
+
+/**
+ * Shared derivation of the planner's working state: the next goal, per-objective
+ * measurement, observed capacity, completed/reserved progress, and the ranked
+ * work items. Both the full plan and the replacement picker build on this so
+ * their priority and mastery math can never drift apart.
+ */
+function computeWorkContext(state: PlanState): WorkContext {
+  const { now } = state;
   const today = todayKey(now);
   const upcoming = nextExam(state.examGoals, now);
-  const goal = activeGoalId
-    ? state.examGoals.find((item) => item.id === activeGoalId) ?? upcoming
+  const goal = state.activeGoalId
+    ? state.examGoals.find((item) => item.id === state.activeGoalId) ?? upcoming
     : upcoming;
-  const horizonEnd = goal ? goal.examDate : addDays(today, DEFAULT_FORECAST_DAYS);
-  const materializeDays = Math.max(
-    1,
-    Math.min(PLAN_HORIZON_DAYS, daysBetween(today, horizonEnd) + 1),
-  );
-
-  const warnings: string[] = [];
-  if (availability.availableDays.length === 0 || availability.maxDailyStudyMinutes <= 0) {
-    warnings.push("No availability configured — there is no study time to allocate yet.");
-  }
-  if (!goal) {
-    warnings.push("No upcoming exam goal — using default priorities and a 14-day window.");
-  }
-  if (state.objectives.length === 0) {
-    warnings.push("No learning objectives yet.");
-  }
 
   const measurements = measureCurriculum({
     objectives: state.objectives,
@@ -572,25 +581,7 @@ export function planStudy(state: PlanState): Plan {
     now,
   });
   const capacity = observeCapacity({ sessionLogs: state.sessionLogs, attempts: state.attempts });
-  const secondsPerCard = observedSecondsPerCard(state.reviewLogs);
   const progress = progressAndReservationsByObjective(state.activities ?? [], today);
-
-  // Pinned future work is fixed: it reserves capacity on its date and is never
-  // reallocated. Past pins don't reserve anything (their date is gone).
-  const pinnedByDate = new Map<string, StudyActivity[]>();
-  for (const activity of state.activities ?? []) {
-    if (
-      activity.pinned !== true ||
-      activity.date < today ||
-      activity.status === "completed" ||
-      activity.status === "skipped"
-    ) {
-      continue;
-    }
-    const list = pinnedByDate.get(activity.date) ?? [];
-    list.push(activity);
-    pinnedByDate.set(activity.date, list);
-  }
 
   const inScope = goal
     ? state.objectives.filter((objective) => goal.subjectIds.includes(objective.subjectId))
@@ -627,6 +618,105 @@ export function planStudy(state: PlanState): Plan {
       unlocked: isUnlocked(objective, measurements, state.objectives),
     };
   });
+
+  return { goal, measurements, capacity, progress, work, inScope };
+}
+
+export type ReplacementCandidate = {
+  objectiveId: string;
+  title: string;
+  subjectId: string;
+  kind: ActivityKind;
+  questionType?: QuestionType;
+  reason: string;
+  score: number;
+};
+
+/**
+ * Ranked alternatives for one scheduled slot: the highest-value unlocked work
+ * (learning, error correction, or practice) other than what is already in the
+ * slot. Optional topics sort last. This is the selector behind "replace
+ * activity".
+ */
+export function replacementCandidates(input: {
+  state: PlanState;
+  current: { kind: ActivityKind; objectiveIds: string[] };
+  limit?: number;
+}): ReplacementCandidate[] {
+  const ctx = computeWorkContext(input.state);
+  const currentObjectiveId = input.current.objectiveIds[0];
+  const sessionMinutes =
+    input.state.availability.preferredSessionMinutes > 0
+      ? input.state.availability.preferredSessionMinutes
+      : DEFAULT_SESSION_MINUTES;
+
+  return ctx.work
+    .map((item) => ({ item, candidate: nextCandidate(item, sessionMinutes) }))
+    .filter(
+      (entry): entry is { item: WorkItem; candidate: Candidate } => entry.candidate !== null,
+    )
+    .filter(
+      ({ item, candidate }) =>
+        !(candidate.kind === input.current.kind && item.objective.id === currentObjectiveId),
+    )
+    .sort((a, b) => {
+      if (a.item.optional !== b.item.optional) return a.item.optional ? 1 : -1;
+      const scoreDiff = b.item.priority.score - a.item.priority.score;
+      if (scoreDiff !== 0) return scoreDiff;
+      return a.item.objective.id.localeCompare(b.item.objective.id);
+    })
+    .slice(0, input.limit ?? 5)
+    .map(({ item, candidate }) => ({
+      objectiveId: item.objective.id,
+      title: item.objective.title,
+      subjectId: item.objective.subjectId,
+      kind: candidate.kind,
+      questionType: candidate.questionType,
+      reason: candidate.reasons[0] ?? "",
+      score: round2(item.priority.score),
+    }));
+}
+
+export function planStudy(state: PlanState): Plan {
+  const { now, availability } = state;
+  const today = todayKey(now);
+  const ctx = computeWorkContext(state);
+  const { goal, measurements, capacity, progress, work, inScope } = ctx;
+  const horizonEnd = goal ? goal.examDate : addDays(today, DEFAULT_FORECAST_DAYS);
+  const materializeDays = Math.max(
+    1,
+    Math.min(PLAN_HORIZON_DAYS, daysBetween(today, horizonEnd) + 1),
+  );
+
+  const warnings: string[] = [];
+  if (availability.availableDays.length === 0 || availability.maxDailyStudyMinutes <= 0) {
+    warnings.push("No availability configured — there is no study time to allocate yet.");
+  }
+  if (!goal) {
+    warnings.push("No upcoming exam goal — using default priorities and a 14-day window.");
+  }
+  if (state.objectives.length === 0) {
+    warnings.push("No learning objectives yet.");
+  }
+
+  const secondsPerCard = observedSecondsPerCard(state.reviewLogs);
+
+  // Pinned future work is fixed: it reserves capacity on its date and is never
+  // reallocated. Past pins don't reserve anything (their date is gone).
+  const pinnedByDate = new Map<string, StudyActivity[]>();
+  for (const activity of state.activities ?? []) {
+    if (
+      activity.pinned !== true ||
+      activity.date < today ||
+      activity.status === "completed" ||
+      activity.status === "skipped"
+    ) {
+      continue;
+    }
+    const list = pinnedByDate.get(activity.date) ?? [];
+    list.push(activity);
+    pinnedByDate.set(activity.date, list);
+  }
 
   const blockedObjectives: BlockedObjective[] = work
     .filter((item) => item.remainingLearning > 0 && !item.unlocked)
