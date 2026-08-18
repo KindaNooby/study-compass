@@ -18,6 +18,7 @@ import {
   ACTIVITY_KIND_LABELS,
   applyPlan,
   buildDayTimetable,
+  explainActivity,
   formatDateKey,
   isAvailabilityConfigured,
   isStudyDay,
@@ -28,6 +29,7 @@ import {
   occupiedBlocksForDate,
   placePlannedActivities,
   planStudy,
+  projectRoadmap,
   replaceActivity,
   replacementCandidates,
   saveActivity,
@@ -45,6 +47,7 @@ import type {
   ActivityKind,
   PlannedActivity,
   PlanDay,
+  PlanState,
   ReplacementCandidate,
   StudyActivity,
 } from "@/lib/planner";
@@ -57,6 +60,7 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  HelpCircle,
   Info,
   Loader2,
   Moon,
@@ -71,8 +75,16 @@ import { Fragment, useEffect, useMemo, useState, type DragEvent } from "react";
 import { toast } from "sonner";
 
 import { CalendarView } from "./Calendar";
+import { RoadmapView } from "./Roadmap";
 import { allowActivityDrop, draggedActivityId, setActivityDrag } from "./dnd";
 import { isActionableStatus, KIND_ICONS, STATUS_LABELS, statusClass } from "./shared";
+
+type ExplainTarget = {
+  date: string;
+  kind: ActivityKind;
+  objectiveIds: string[];
+  plannedMinutes: number;
+};
 
 function restoreActivity(activity: StudyActivity): StudyActivity {
   const { completedMinutes: _completedMinutes, ...rest } = activity;
@@ -82,9 +94,11 @@ function restoreActivity(activity: StudyActivity): StudyActivity {
 function ActivityRow({
   activity,
   objectiveById,
+  onExplain,
 }: {
   activity: PlannedActivity;
   objectiveById: Map<string, string>;
+  onExplain: (activity: ExplainTarget) => void;
 }) {
   const Icon = KIND_ICONS[activity.kind];
   const objectiveLabel =
@@ -99,7 +113,17 @@ function ActivityRow({
           <Icon className="size-3.5 text-[#5871ae]" />
           {ACTIVITY_KIND_LABELS[activity.kind]}
         </span>
-        <span className="text-xs font-bold text-[#3a3b45]">{activity.plannedMinutes} min</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-[#3a3b45]">{activity.plannedMinutes} min</span>
+          <button
+            type="button"
+            onClick={() => onExplain(activity)}
+            className="cursor-pointer inline-flex items-center gap-1 rounded-full border border-[#e3e4eb] px-2 py-0.5 text-[10px] font-bold text-[#5a5b68] hover:bg-[#f4f5fa]"
+            title="Why this activity?"
+          >
+            <HelpCircle className="size-3" /> Why?
+          </button>
+        </div>
       </div>
       <p className="mt-2 text-sm font-semibold text-[#3a3b45]">{objectiveLabel}</p>
       {(activity.cardCount !== undefined || activity.questionCount !== undefined) && (
@@ -154,7 +178,15 @@ function PinnedActivityRow({
   );
 }
 
-function DayCard({ day, objectiveById }: { day: PlanDay; objectiveById: Map<string, string> }) {
+function DayCard({
+  day,
+  objectiveById,
+  onExplain,
+}: {
+  day: PlanDay;
+  objectiveById: Map<string, string>;
+  onExplain: (activity: ExplainTarget) => void;
+}) {
   const weekday = WEEKDAYS.find((item) => item.value === day.weekday);
   const hasPinned = day.pinnedActivities.length > 0;
   const hasDerived = day.activities.length > 0;
@@ -198,6 +230,7 @@ function DayCard({ day, objectiveById }: { day: PlanDay; objectiveById: Map<stri
                 key={`${activity.kind}-${activity.objectiveIds.join(",")}-${index}`}
                 activity={activity}
                 objectiveById={objectiveById}
+                onExplain={onExplain}
               />
             ))}
           </div>
@@ -213,12 +246,14 @@ function ScheduleActivityRow({
   onSave,
   onSnooze,
   onReplace,
+  onExplain,
 }: {
   activity: StudyActivity;
   objectiveById: Map<string, string>;
   onSave: (activity: StudyActivity) => void;
   onSnooze: (activity: StudyActivity) => void;
   onReplace: (activity: StudyActivity) => void;
+  onExplain: (activity: ExplainTarget) => void;
 }) {
   const [rescheduling, setRescheduling] = useState(false);
   const Icon = KIND_ICONS[activity.kind];
@@ -350,6 +385,13 @@ function ScheduleActivityRow({
                   <ArrowRightLeft className="size-3" /> Replace
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => onExplain(activity)}
+                className="cursor-pointer inline-flex items-center gap-1 rounded-full border border-[#e3e4eb] px-2.5 py-1 text-[11px] font-bold text-[#5a5b68] hover:bg-[#f4f5fa]"
+              >
+                <HelpCircle className="size-3" /> Why?
+              </button>
             </>
           ) : (
             <button
@@ -366,7 +408,7 @@ function ScheduleActivityRow({
   );
 }
 
-type ScheduleView = "recommendation" | "calendar" | "today" | "schedule";
+type ScheduleView = "recommendation" | "calendar" | "roadmap" | "today" | "schedule";
 
 function TodayView({
   objectiveById,
@@ -581,6 +623,7 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
   const [view, setView] = useState<ScheduleView>("recommendation");
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   const [replacing, setReplacing] = useState<StudyActivity | null>(null);
+  const [explaining, setExplaining] = useState<ExplainTarget | null>(null);
 
   const [today, setToday] = useState(() => todayKey());
   useEffect(() => {
@@ -621,9 +664,14 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
     [curriculum.objectives],
   );
 
-  const plan = useMemo(() => {
+  const subjectById = useMemo(
+    () => new Map(curriculum.subjects.map((subject) => [subject.id, subject.title])),
+    [curriculum.subjects],
+  );
+
+  const planState = useMemo<PlanState | null>(() => {
     if (loading || !availability) return null;
-    return planStudy({
+    return {
       objectives: curriculum.objectives,
       cards: measurement.cards,
       attempts: measurement.attempts,
@@ -634,7 +682,7 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
       activities,
       availability,
       now,
-    });
+    };
   }, [
     loading,
     availability,
@@ -648,6 +696,24 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
     activities,
     now,
   ]);
+
+  const plan = useMemo(() => (planState ? planStudy(planState) : null), [planState]);
+
+  const replacementOptions = useMemo(() => {
+    if (!replacing || !planState) return [];
+    return replacementCandidates({
+      state: planState,
+      current: { kind: replacing.kind, objectiveIds: replacing.objectiveIds },
+      limit: 5,
+    });
+  }, [replacing, planState]);
+
+  const roadmap = useMemo(() => (planState ? projectRoadmap(planState) : null), [planState]);
+
+  const explanation = useMemo(() => {
+    if (!explaining || !planState) return null;
+    return explainActivity({ state: planState, target: explaining });
+  }, [explaining, planState]);
 
   const scheduleDays = useMemo(() => {
     const upcoming = activities
@@ -711,38 +777,6 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
   const weekReviewCards = plan.dueForecast
     .slice(0, plan.days.length)
     .reduce((sum, point) => sum + point.cardCount, 0);
-
-  const replacementOptions = useMemo(() => {
-    if (!replacing || !availability) return [];
-    return replacementCandidates({
-      state: {
-        objectives: curriculum.objectives,
-        cards: measurement.cards,
-        attempts: measurement.attempts,
-        reviewLogs: measurement.reviewLogs,
-        sessionLogs: measurement.sessionLogs,
-        examGoals: goals,
-        activeGoalId: activeGoal?.id,
-        activities,
-        availability,
-        now,
-      },
-      current: { kind: replacing.kind, objectiveIds: replacing.objectiveIds },
-      limit: 5,
-    });
-  }, [
-    replacing,
-    availability,
-    curriculum.objectives,
-    measurement.cards,
-    measurement.attempts,
-    measurement.reviewLogs,
-    measurement.sessionLogs,
-    goals,
-    activeGoal?.id,
-    activities,
-    now,
-  ]);
 
   const handleApply = async () => {
     if (!plan || !availability) return;
@@ -895,7 +929,7 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
       </section>
 
       <div className="mt-6 flex w-fit rounded-full bg-[#f1f2f7] p-1">
-        {(["recommendation", "calendar", "today", "schedule"] as const).map((value) => (
+        {(["recommendation", "calendar", "roadmap", "today", "schedule"] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -908,9 +942,11 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
               ? "Recommendation"
               : value === "calendar"
                 ? "Calendar"
-                : value === "today"
-                  ? "Today"
-                  : "My schedule"}
+                : value === "roadmap"
+                  ? "Roadmap"
+                  : value === "today"
+                    ? "Today"
+                    : "My schedule"}
           </button>
         ))}
       </div>
@@ -1111,7 +1147,12 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {plan.days.map((day) => (
-                <DayCard key={day.date} day={day} objectiveById={objectiveById} />
+                <DayCard
+                  key={day.date}
+                  day={day}
+                  objectiveById={objectiveById}
+                  onExplain={(activity) => setExplaining(activity)}
+                />
               ))}
             </div>
           </section>
@@ -1146,6 +1187,10 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
         </>
       ) : view === "calendar" ? (
         <CalendarView objectiveById={objectiveById} onNavigate={onNavigate} />
+      ) : view === "roadmap" ? (
+        roadmap ? (
+          <RoadmapView roadmap={roadmap} objectiveById={objectiveById} subjectById={subjectById} />
+        ) : null
       ) : view === "today" ? (
         <TodayView objectiveById={objectiveById} onNavigate={onNavigate} />
       ) : (
@@ -1225,6 +1270,7 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
                             onSave={handleSaveActivity}
                             onSnooze={handleSnooze}
                             onReplace={setReplacing}
+                            onExplain={(activity) => setExplaining(activity)}
                           />
                         ))}
                       </div>
@@ -1283,6 +1329,117 @@ export function Plan({ onNavigate }: { onNavigate: (view: "setup" | "study") => 
               })
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={explaining !== null} onOpenChange={(open) => !open && setExplaining(null)}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Why this activity?</DialogTitle>
+            <DialogDescription>
+              {explanation
+                ? `${ACTIVITY_KIND_LABELS[explanation.kind]} · ${formatDateKey(explanation.date)} · ${explanation.plannedMinutes} min`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {explanation && (
+            <div className="grid gap-3">
+              {explanation.priority && (
+                <div className="rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9ca5]">Priority</p>
+                  <p className="mt-1 text-2xl font-bold tracking-[-0.03em] text-[#23242c]">
+                    {Math.round(explanation.priority.score * 100)}
+                    <span className="text-sm font-semibold text-[#8a8b95]">/100</span>
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {(
+                      [
+                        ["Importance", explanation.priority.importance],
+                        ["Topic", explanation.priority.topic],
+                        ["Subject", explanation.priority.subject],
+                        ["Urgency", explanation.priority.urgency],
+                      ] as const
+                    ).map(([label, value]) => (
+                      <div key={label} className="rounded-[10px] bg-[#f1f2f7] px-2 py-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9b9ca5]">{label}</p>
+                        <p className="text-sm font-bold text-[#3a3b45]">{Math.round(value * 100)}%</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {explanation.due && (
+                <div className="rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9ca5]">Due review</p>
+                  <p className="mt-1 text-sm font-semibold text-[#3a3b45]">
+                    {explanation.due.cardCount} card{explanation.due.cardCount === 1 ? "" : "s"} due
+                    {explanation.due.overdueCount > 0 && ` · ${explanation.due.overdueCount} overdue`}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[#8a8b95]">
+                    ~{explanation.due.minutes} min at your observed review pace.
+                  </p>
+                </div>
+              )}
+
+              {explanation.prereqs && (
+                <div
+                  className={`rounded-[14px] border p-3 ${
+                    explanation.prereqs.unlocked
+                      ? "border-[#e4f3e9] bg-[#f0f9f3]"
+                      : "border-[#fff0dc] bg-[#fff8ea]"
+                  }`}
+                >
+                  <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9ca5]">Prerequisites</p>
+                  <p className="mt-1 text-sm font-semibold text-[#3a3b45]">
+                    {explanation.prereqs.unlocked
+                      ? "Unlocked — earlier topics are practised."
+                      : `Waiting on: ${explanation.prereqs.missingTitles.join(", ") || "earlier topics"}`}
+                  </p>
+                </div>
+              )}
+
+              <div className="rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] p-3">
+                <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9ca5]">Capacity</p>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9b9ca5]">Effective</p>
+                    <p className="text-sm font-bold text-[#3a3b45]">{explanation.capacity.effectiveMinutes} min</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9b9ca5]">Configured</p>
+                    <p className="text-sm font-bold text-[#3a3b45]">{explanation.capacity.configuredCap} min</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9b9ca5]">Observed</p>
+                    <p className="text-sm font-bold text-[#3a3b45]">
+                      {explanation.capacity.observedPerDay === null
+                        ? "—"
+                        : `${Math.round(explanation.capacity.observedPerDay)} min`}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#9b9ca5]">Sessions</p>
+                    <p className="text-sm font-bold text-[#3a3b45]">{explanation.capacity.evidenceSessions}</p>
+                  </div>
+                </div>
+              </div>
+
+              {explanation.reasons.length > 0 && (
+                <div className="rounded-[14px] border border-[#e8e9f1] bg-[#fbfbfd] p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9ca5]">In plain terms</p>
+                  <ul className="mt-1.5 space-y-1">
+                    {explanation.reasons.map((reason, index) => (
+                      <li key={index} className="flex items-start gap-2 text-xs leading-5 text-[#5a5b68]">
+                        <Info className="mt-0.5 size-3.5 shrink-0 text-[#5871ae]" />
+                        <span>{reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </>

@@ -160,6 +160,81 @@ export type Plan = {
   warnings: string[];
 };
 
+// --- Explanation & roadmap (phase 5) ---
+
+export type PriorityExplanation = {
+  score: number;
+  importance: number;
+  topic: number;
+  subject: number;
+  urgency: number;
+};
+
+export type DueExplanation = {
+  cardCount: number;
+  overdueCount: number;
+  minutes: number;
+};
+
+export type PrereqExplanation = {
+  unlocked: boolean;
+  missingIds: string[];
+  missingTitles: string[];
+};
+
+export type CapacityExplanation = {
+  configuredCap: number;
+  observedPerDay: number | null;
+  effectiveMinutes: number;
+  evidenceSessions: number;
+};
+
+export type ActivityExplanation = {
+  kind: ActivityKind;
+  date: string;
+  plannedMinutes: number;
+  objectiveTitles: string[];
+  priority: PriorityExplanation | null;
+  due: DueExplanation | null;
+  prereqs: PrereqExplanation | null;
+  capacity: CapacityExplanation;
+  reasons: string[];
+};
+
+export type RoadmapMilestone = {
+  id: string;
+  label: string;
+  date: string;
+  kind: "exam" | "deadline";
+  daysAway: number;
+};
+
+export type SubjectRoadmap = {
+  subjectId: string;
+  weight: number;
+  totalMinutes: number;
+  completedMinutes: number;
+  remainingMinutes: number;
+  blockedMinutes: number;
+  coverage: number;
+};
+
+export type Roadmap = {
+  goalId: string | null;
+  goalName: string | null;
+  examDate: string | null;
+  daysToExam: number | null;
+  projectedFinishDate: string | null;
+  /** True when the projection finishes by the exam, false when behind, null without a goal. */
+  onTrack: boolean | null;
+  remainingMinutes: number;
+  effectiveDailyMinutes: number;
+  subjects: SubjectRoadmap[];
+  milestones: RoadmapMilestone[];
+  blockedObjectives: BlockedObjective[];
+  warnings: string[];
+};
+
 // --- Internal working types ---
 
 type WorkItem = {
@@ -938,6 +1013,252 @@ export function planStudy(state: PlanState): Plan {
     feasibility,
     blockedObjectives,
     warnings,
+  };
+}
+
+/**
+ * Explains why one scheduled activity exists: the priority components that
+ * ranked it, the due-card pressure behind a review, the prerequisite gate, and
+ * the capacity math for its day. Deterministic and read-only.
+ */
+export function explainActivity(input: {
+  state: PlanState;
+  target: { date: string; kind: ActivityKind; objectiveIds: string[]; plannedMinutes: number };
+}): ActivityExplanation {
+  const { state, target } = input;
+  const ctx = computeWorkContext(state);
+  const { goal, measurements, capacity } = ctx;
+  const today = todayKey(state.now);
+
+  const objectives = target.objectiveIds
+    .map((id) => state.objectives.find((objective) => objective.id === id))
+    .filter((objective): objective is LearningObjective => objective !== undefined);
+
+  let priority: PriorityExplanation | null = null;
+  if (objectives.length === 1) {
+    const objective = objectives[0];
+    const score = objectivePriority({
+      objective,
+      goal,
+      subjectWeight: subjectWeightFor(goal, objective.subjectId),
+      topicPriority: topicPriorityFor(goal, objective.topicId),
+      now: state.now,
+    });
+    priority = {
+      score: round2(score.score),
+      importance: round2(score.importance),
+      topic: round2(score.topic),
+      subject: round2(score.subject),
+      urgency: round2(score.urgency),
+    };
+  }
+
+  let due: DueExplanation | null = null;
+  if (target.kind === "fsrs_review") {
+    const secondsPerCard = observedSecondsPerCard(state.reviewLogs);
+    const horizonEnd = goal ? goal.examDate : addDays(today, DEFAULT_FORECAST_DAYS);
+    const point = forecastDueReviews(state.cards, secondsPerCard, state.now, horizonEnd).find(
+      (candidate) => candidate.date === target.date,
+    );
+    if (point) {
+      const overdueCount = state.cards.filter(
+        (card) =>
+          !card.suspended && card.state !== "New" && toDateKey(new Date(card.due)) < today,
+      ).length;
+      due = { cardCount: point.cardCount, overdueCount, minutes: point.minutes };
+    }
+  }
+
+  let prereqs: PrereqExplanation | null = null;
+  if (isLearningKind(target.kind) && objectives.length === 1) {
+    const objective = objectives[0];
+    const unlocked = isUnlocked(objective, measurements, state.objectives);
+    const missingIds = allPrerequisites(objective.id, state.objectives).filter((id) => {
+      const level = measurements.get(id)?.acquisition ?? "not_started";
+      return !UNLOCK_ACQUISITION_LEVELS.has(level);
+    });
+    const missingTitles = missingIds.map((id) => {
+      const match = state.objectives.find((item) => item.id === id);
+      return match ? match.title : id;
+    });
+    prereqs = { unlocked, missingIds, missingTitles };
+  }
+
+  const configuredCap = state.availability.maxDailyStudyMinutes;
+  const observedPerDay = capacity.averageCompletedMinutesPerDay;
+  const effectiveMinutes = effectiveDailyMinutes(target.date, state.availability, capacity);
+
+  const reasons: string[] = [];
+  if (priority) {
+    reasons.push(
+      `Priority ${Math.round(priority.score * 100)}/100 — importance ${Math.round(
+        priority.importance * 100,
+      )}%, topic ${Math.round(priority.topic * 100)}%, subject ${Math.round(
+        priority.subject * 100,
+      )}%, urgency ${Math.round(priority.urgency * 100)}%.`,
+    );
+  }
+  if (due) {
+    reasons.push(
+      `${due.cardCount} card${due.cardCount === 1 ? "" : "s"} due this day${
+        due.overdueCount > 0 ? ` (${due.overdueCount} overdue now)` : ""
+      }.`,
+    );
+  }
+  if (prereqs) {
+    reasons.push(
+      prereqs.unlocked
+        ? "Prerequisites are practised — this objective is unlocked."
+        : `Waiting on ${prereqs.missingTitles.join(", ") || "prerequisites"} to reach practised level.`,
+    );
+  }
+  reasons.push(
+    `${effectiveMinutes} min effective capacity this day — configured ${configuredCap} min${
+      observedPerDay === null
+        ? ", no observed pace yet"
+        : `, observed ${Math.round(observedPerDay)} min`
+    }.`,
+  );
+
+  return {
+    kind: target.kind,
+    date: target.date,
+    plannedMinutes: target.plannedMinutes,
+    objectiveTitles: objectives.map((objective) => objective.title),
+    priority,
+    due,
+    prereqs,
+    capacity: {
+      configuredCap,
+      observedPerDay,
+      effectiveMinutes,
+      evidenceSessions: capacity.completedSessions,
+    },
+    reasons,
+  };
+}
+
+/**
+ * A forward-looking projection of the path to the exam: how much work remains,
+ * when it finishes at the current effective pace, per-subject coverage, and the
+ * milestones in between. Derived from the same feasibility math as the plan so
+ * the two views never disagree.
+ */
+export function projectRoadmap(state: PlanState): Roadmap {
+  const plan = planStudy(state);
+  const ctx = computeWorkContext(state);
+  const { goal, measurements, capacity, progress, inScope } = ctx;
+  const today = plan.horizonStart;
+
+  // Effective capacity is constant across study days, so sample the next one.
+  let paceMinutes = 0;
+  for (let i = 0; i < 8; i++) {
+    const candidate = effectiveDailyMinutes(addDays(today, i), state.availability, capacity);
+    if (candidate > 0) {
+      paceMinutes = candidate;
+      break;
+    }
+  }
+
+  // Walk study days, spending effective capacity, until the remaining work is gone.
+  let projectedFinishDate: string | null = today;
+  if (plan.feasibility.requiredMinutes > 0) {
+    projectedFinishDate = null;
+    let remaining = plan.feasibility.requiredMinutes;
+    let cursor = today;
+    for (let i = 0; i < 730; i++) {
+      remaining -= effectiveDailyMinutes(cursor, state.availability, capacity);
+      if (remaining <= 0) {
+        projectedFinishDate = cursor;
+        break;
+      }
+      cursor = addDays(cursor, 1);
+    }
+  }
+
+  const bySubject = new Map<string, SubjectRoadmap>();
+  for (const objective of inScope) {
+    const measurement = measurements.get(objective.id)!;
+    const entry =
+      bySubject.get(objective.subjectId) ??
+      {
+        subjectId: objective.subjectId,
+        weight: subjectWeightFor(goal, objective.subjectId),
+        totalMinutes: 0,
+        completedMinutes: 0,
+        remainingMinutes: 0,
+        blockedMinutes: 0,
+        coverage: 0,
+      };
+    const learningOwed = Math.max(
+      0,
+      remainingLearningMinutes(objective, measurement) -
+        (progress.completedLearning.get(objective.id) ?? 0),
+    );
+    const practiceOwed = Math.max(
+      0,
+      remainingPracticeMinutes(objective, measurement) -
+        (progress.completedPractice.get(objective.id) ?? 0),
+    );
+    const learningDone = Math.min(
+      objective.estimatedLearningMinutes,
+      progress.completedLearning.get(objective.id) ?? 0,
+    );
+    const practiceDone = Math.min(
+      objective.estimatedPracticeMinutes,
+      progress.completedPractice.get(objective.id) ?? 0,
+    );
+    entry.totalMinutes += objective.estimatedLearningMinutes + objective.estimatedPracticeMinutes;
+    entry.completedMinutes += learningDone + practiceDone;
+    entry.remainingMinutes += learningOwed + practiceOwed;
+    if (!isUnlocked(objective, measurements, state.objectives)) {
+      entry.blockedMinutes += learningOwed + practiceOwed;
+    }
+    bySubject.set(objective.subjectId, entry);
+  }
+  for (const entry of bySubject.values()) {
+    entry.coverage =
+      entry.totalMinutes === 0 ? 1 : clamp01(entry.completedMinutes / entry.totalMinutes);
+  }
+
+  const milestones: RoadmapMilestone[] = [];
+  if (goal) {
+    milestones.push({
+      id: "exam",
+      label: goal.name,
+      date: goal.examDate,
+      kind: "exam",
+      daysAway: daysBetween(today, goal.examDate),
+    });
+    for (const deadline of goal.externalDeadlines) {
+      milestones.push({
+        id: deadline.id,
+        label: deadline.label,
+        date: deadline.date,
+        kind: "deadline",
+        daysAway: daysBetween(today, deadline.date),
+      });
+    }
+  }
+  milestones.sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind));
+
+  return {
+    goalId: goal?.id ?? null,
+    goalName: goal?.name ?? null,
+    examDate: goal?.examDate ?? null,
+    daysToExam: goal ? daysBetween(today, goal.examDate) : null,
+    projectedFinishDate,
+    onTrack: goal
+      ? projectedFinishDate !== null && projectedFinishDate <= goal.examDate
+      : null,
+    remainingMinutes: plan.feasibility.requiredMinutes,
+    effectiveDailyMinutes: paceMinutes,
+    subjects: Array.from(bySubject.values()).sort((a, b) =>
+      a.subjectId.localeCompare(b.subjectId),
+    ),
+    milestones,
+    blockedObjectives: plan.blockedObjectives,
+    warnings: plan.warnings,
   };
 }
 

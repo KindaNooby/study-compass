@@ -4,9 +4,11 @@ import { emptyAvailability } from "../src/lib/planner/db";
 import { observeCapacity } from "../src/lib/planner/measurement";
 import {
   effectiveDailyMinutes,
+  explainActivity,
   forecastDueReviews,
   nextStudyDayAfter,
   planStudy,
+  projectRoadmap,
   replacementCandidates,
   stableActivityKey,
   urgencyForDate,
@@ -313,6 +315,130 @@ describe("planStudy", () => {
     });
     const plan = planStudy(state);
     expect(plan.days).toHaveLength(7);
+  });
+});
+
+describe("explainActivity", () => {
+  test("breaks down the priority components for a single-objective activity", () => {
+    const state = makeState({
+      objectives: [makeObjective({ id: "o1", importance: 0.8 })],
+      examGoals: [makeGoal()],
+    });
+    const explanation = explainActivity({
+      state,
+      target: { date: "2026-08-17", kind: "learn_new_content", objectiveIds: ["o1"], plannedMinutes: 30 },
+    });
+    expect(explanation.objectiveTitles).toEqual(["Objective 1"]);
+    expect(explanation.priority?.importance).toBe(0.8);
+    expect(explanation.priority?.subject).toBe(1);
+    expect(explanation.prereqs?.unlocked).toBe(true);
+    expect(explanation.reasons.length).toBeGreaterThan(0);
+  });
+
+  test("reports due cards and overdue pressure for a review", () => {
+    const state = makeState({
+      objectives: [makeObjective()],
+      cards: [
+        makeCard({
+          id: "overdue",
+          state: "Review",
+          stability: 1,
+          due: localIso(2026, 7, 15, 9),
+          lastReview: localIso(2026, 7, 8, 9),
+          reps: 1,
+        }),
+      ],
+      examGoals: [makeGoal()],
+    });
+    const explanation = explainActivity({
+      state,
+      target: { date: "2026-08-16", kind: "fsrs_review", objectiveIds: ["o1"], plannedMinutes: 5 },
+    });
+    expect(explanation.due?.cardCount).toBe(1);
+    expect(explanation.due?.overdueCount).toBe(1);
+  });
+
+  test("names the missing prerequisites that block a dependent", () => {
+    const state = makeState({
+      objectives: [
+        makeObjective({ id: "a", title: "Prereq A" }),
+        makeObjective({ id: "b", title: "Dependent B", prerequisiteIds: ["a"] }),
+      ],
+      examGoals: [makeGoal()],
+    });
+    const explanation = explainActivity({
+      state,
+      target: { date: "2026-08-17", kind: "learn_new_content", objectiveIds: ["b"], plannedMinutes: 30 },
+    });
+    expect(explanation.prereqs?.unlocked).toBe(false);
+    expect(explanation.prereqs?.missingIds).toEqual(["a"]);
+    expect(explanation.prereqs?.missingTitles).toEqual(["Prereq A"]);
+  });
+
+  test("uses the configured cap as effective capacity with no evidence", () => {
+    const explanation = explainActivity({
+      state: makeState({ objectives: [makeObjective()], examGoals: [makeGoal()] }),
+      target: { date: "2026-08-17", kind: "learn_new_content", objectiveIds: ["o1"], plannedMinutes: 30 },
+    });
+    expect(explanation.capacity.effectiveMinutes).toBe(120);
+    expect(explanation.capacity.observedPerDay).toBeNull();
+    expect(explanation.capacity.evidenceSessions).toBe(0);
+  });
+});
+
+describe("projectRoadmap", () => {
+  test("projects a finish date and on-track verdict when work fits", () => {
+    const state = makeState({
+      objectives: [makeObjective({ estimatedLearningMinutes: 60, estimatedPracticeMinutes: 60 })],
+      examGoals: [makeGoal({ examDate: "2026-08-30" })],
+    });
+    const roadmap = projectRoadmap(state);
+    expect(roadmap.remainingMinutes).toBe(120);
+    expect(roadmap.projectedFinishDate).toBe("2026-08-16");
+    expect(roadmap.onTrack).toBe(true);
+  });
+
+  test("marks the roadmap off-track when the workload cannot fit", () => {
+    const state = makeState({
+      objectives: [makeObjective({ estimatedLearningMinutes: 600, estimatedPracticeMinutes: 600 })],
+      examGoals: [makeGoal({ examDate: "2026-08-18" })],
+      availability: makeAvailability({ availableDays: [1], maxDailyStudyMinutes: 30 }),
+    });
+    const roadmap = projectRoadmap(state);
+    expect(roadmap.onTrack).toBe(false);
+    expect(roadmap.projectedFinishDate).not.toBeNull();
+    expect(roadmap.projectedFinishDate! > "2026-08-18").toBe(true);
+  });
+
+  test("reports per-subject coverage and blocked minutes", () => {
+    const state = makeState({
+      objectives: [
+        makeObjective({ id: "a", subjectId: "s1", title: "A", estimatedLearningMinutes: 100, estimatedPracticeMinutes: 0 }),
+        makeObjective({ id: "b", subjectId: "s2", title: "B", estimatedLearningMinutes: 100, estimatedPracticeMinutes: 0, prerequisiteIds: ["a"] }),
+      ],
+      examGoals: [makeGoal({ subjectIds: ["s1", "s2"], subjectWeighting: { s1: 1, s2: 1 } })],
+    });
+    const roadmap = projectRoadmap(state);
+    expect(roadmap.subjects).toHaveLength(2);
+    const blocked = roadmap.subjects.find((subject) => subject.subjectId === "s2");
+    expect(blocked?.blockedMinutes).toBe(100);
+    expect(blocked?.coverage).toBe(0);
+  });
+
+  test("lists milestones in date order and returns null onTrack without a goal", () => {
+    const state = makeState({
+      objectives: [makeObjective()],
+      examGoals: [
+        makeGoal({ externalDeadlines: [{ id: "d1", label: "Mock", date: "2026-08-20" }] }),
+      ],
+    });
+    const roadmap = projectRoadmap(state);
+    expect(roadmap.milestones.map((milestone) => milestone.kind)).toEqual(["deadline", "exam"]);
+    expect(roadmap.milestones[0].label).toBe("Mock");
+
+    const noGoal = projectRoadmap(makeState({ objectives: [makeObjective()] }));
+    expect(noGoal.onTrack).toBeNull();
+    expect(noGoal.milestones).toEqual([]);
   });
 });
 
