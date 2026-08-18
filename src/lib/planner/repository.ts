@@ -294,7 +294,10 @@ export async function updateExamGoal(goal: ExamGoal): Promise<void> {
 }
 
 export async function deleteExamGoal(goalId: string): Promise<void> {
-  await db.examGoals.delete(goalId);
+  await db.transaction("rw", [db.examGoals, db.activities], async () => {
+    await db.examGoals.delete(goalId);
+    await db.activities.where("examGoalId").equals(goalId).delete();
+  });
 }
 
 // --- Availability ---
@@ -317,11 +320,42 @@ export async function activitiesForDate(date: string): Promise<StudyActivity[]> 
 
 /**
  * Persists a student edit to a scheduled activity (complete, skip, move,
- * postpone, restore). The caller supplies the full updated row so validation
- * happens in one place and the planner never guesses intent.
+ * postpone, restore) and keeps its linked session log in step with the row's
+ * outcome. Completing/skipping writes the outcome fact; restoring a finished
+ * row withdraws its previously recorded fact so the observed-capacity model
+ * can't double-count when the row is later completed again.
  */
 export async function saveActivity(activity: StudyActivity): Promise<void> {
-  await db.activities.put(studyActivitySchema.parse(activity));
+  const parsed = studyActivitySchema.parse(activity);
+  await db.transaction("rw", [db.activities, db.sessionLogs], async () => {
+    const previous = await db.activities.get(parsed.id);
+    const wasTerminal = previous?.status === "completed" || previous?.status === "skipped";
+    const isTerminal = parsed.status === "completed" || parsed.status === "skipped";
+
+    await db.activities.put(parsed);
+
+    if (wasTerminal && !isTerminal) {
+      // Restore: the row is no longer finished, so its outcome fact is withdrawn.
+      await db.sessionLogs.where("activityId").equals(parsed.id).delete();
+    } else if (isTerminal) {
+      await db.sessionLogs.add(
+        sessionLogSchema.parse({
+          id: uid(),
+          date: parsed.date,
+          activityId: parsed.id,
+          kind: parsed.kind,
+          objectiveIds: parsed.objectiveIds,
+          plannedMinutes: parsed.plannedMinutes,
+          actualMinutes:
+            parsed.status === "completed"
+              ? Math.max(1, parsed.completedMinutes ?? parsed.plannedMinutes)
+              : 0,
+          status: parsed.status,
+          endedAt: new Date().toISOString(),
+        }),
+      );
+    }
+  });
 }
 
 /**
@@ -372,7 +406,12 @@ export async function applyPlan(
   const plannedByKey = new Map<string, PlannedActivity>();
   for (const item of planned) plannedByKey.set(stableActivityKey(item), item);
   const existingByKey = new Map<string, StudyActivity>();
-  for (const item of existing) existingByKey.set(stableActivityKey(item), item);
+  for (const item of existing) {
+    // Completed rows are a historical record of finished work: they must never
+    // absorb newly-owed minutes on a re-apply, so exclude them from matching.
+    if (item.status === "completed") continue;
+    existingByKey.set(stableActivityKey(item), item);
+  }
 
   const toAdd: StudyActivity[] = [];
   const toUpdate: StudyActivity[] = [];

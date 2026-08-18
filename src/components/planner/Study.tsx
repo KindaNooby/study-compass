@@ -15,6 +15,7 @@ import {
   closePlannedActivity,
   formatDateKey,
   isDue,
+  isDueByDay,
   reviewCard,
   todayKey,
   useActivities,
@@ -51,7 +52,7 @@ function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
   const due = useMemo(
     () =>
       cards
-        .filter((card) => !card.suspended && isDue(card))
+        .filter((card) => !card.suspended && isDueByDay(card))
         .sort((a, b) => a.due.localeCompare(b.due)),
     [cards],
   );
@@ -197,7 +198,7 @@ function ReviewRunner({ onViewMeasure }: { onViewMeasure?: () => void }) {
     return (
       <div className="rounded-[16px] border border-dashed border-[#d8dae5] p-8 text-center">
         <p className="text-sm font-semibold text-[#5a5b68]">
-          {due.length === 0 ? "Nothing due right now." : `${due.length} card${due.length === 1 ? "" : "s"} ready.`}
+          {due.length === 0 ? "Nothing due today." : `${due.length} card${due.length === 1 ? "" : "s"} ready.`}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           {due.length === 0
@@ -548,7 +549,14 @@ function SessionLogger() {
   const chooseActivity = (id: string) => {
     setActivityId(id);
     const activity = activities.find((item) => item.id === id);
-    if (!activity) return;
+    if (!activity) {
+      // Back to a free-form session: clear the linked activity's prefill.
+      setDate(todayKey());
+      setKind("");
+      setObjectiveId("");
+      setPlannedMinutes("30");
+      return;
+    }
     setDate(activity.date);
     setKind(activity.kind);
     setObjectiveId(activity.objectiveIds[0] ?? "");

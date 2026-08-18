@@ -21,6 +21,7 @@ import {
   isAvailabilityConfigured,
   normalizeAvailability,
   saveAvailability,
+  toDateKey,
   uid,
   updateExamGoal,
   useAvailability,
@@ -102,7 +103,7 @@ function emptyGoalForm(): GoalFormState {
   future.setDate(future.getDate() + 30);
   return {
     name: "",
-    examDate: future.toISOString().slice(0, 10),
+    examDate: toDateKey(future),
     subjectIds: [],
     targetGrade: "",
     targetScore: "",

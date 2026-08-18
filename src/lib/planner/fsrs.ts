@@ -121,3 +121,16 @@ export function retrievability(card: FsrsCard, now = new Date()): number {
 export function isDue(card: FsrsCard, now = new Date()): boolean {
   return new Date(card.due).getTime() <= now.getTime();
 }
+
+/**
+ * Day-granular "is this card due today (or earlier)?" — matches the planner's
+ * date-key bucketing so the review queue agrees with the weekly plan. The
+ * wall-clock `isDue` above remains the exact "due right now" check used for
+ * live counters.
+ */
+export function isDueByDay(card: FsrsCard, now = new Date()): boolean {
+  const due = new Date(card.due);
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
+  const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return dueDay <= nowDay;
+}

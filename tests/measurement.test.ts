@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { applyReview, emptyCardState, isDue, retrievability } from "../src/lib/planner/fsrs";
+import { applyReview, emptyCardState, isDue, isDueByDay, retrievability } from "../src/lib/planner/fsrs";
 import {
   acquisitionLevel,
   errorBreakdown,
@@ -91,6 +91,19 @@ describe("fsrs wrapper", () => {
   test("isDue compares the due time against now", () => {
     expect(isDue(makeCard({ due: "2026-08-16T09:00:00.000Z" }), NOW)).toBe(true);
     expect(isDue(makeCard({ due: "2026-08-16T11:00:00.000Z" }), NOW)).toBe(false);
+  });
+});
+
+describe("isDueByDay", () => {
+  test("counts a card due later today as due today, but not a card due tomorrow", () => {
+    const now = new Date(2026, 7, 16, 8, 0, 0);
+    expect(isDueByDay(makeCard({ due: new Date(2026, 7, 16, 23, 0, 0).toISOString() }), now)).toBe(true);
+    expect(isDueByDay(makeCard({ due: new Date(2026, 7, 17, 0, 30, 0).toISOString() }), now)).toBe(false);
+  });
+
+  test("counts overdue cards as due today", () => {
+    const now = new Date(2026, 7, 16, 8, 0, 0);
+    expect(isDueByDay(makeCard({ due: new Date(2026, 7, 15, 20, 0, 0).toISOString() }), now)).toBe(true);
   });
 });
 
