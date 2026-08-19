@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Route, Routes } from "react-router";
+import { HashRouter, Route, Routes } from "react-router";
 import Landing from "./pages/Landing.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -12,7 +12,7 @@ import "./index.css";
 // builds; registering there keeps the preview server untouched.
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((error) => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((error) => {
       console.warn("Service worker registration failed:", error);
     });
   });
@@ -20,13 +20,13 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
     <Toaster />
   </StrictMode>,
 );

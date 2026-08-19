@@ -6,19 +6,28 @@
  * backend or API. So once the app shell is cached, Study Compass opens and
  * runs with no network at all.
  *
+ * Everything is resolved relative to the service worker's scope (rather than
+ * hardcoded to "/") so the same build works from a domain root, a custom
+ * domain, or a GitHub Pages project site at https://<user>.github.io/<repo>/.
+ *
  * Strategy:
  *   - App navigations: cache-first, so a previously visited install opens
  *     instantly offline; the cached shell is refreshed in the background
  *     whenever a network connection is available.
- *   - Hashed static assets (/assets/*, fonts, images, css, manifest):
+ *   - Hashed static assets (assets/, fonts, images, css, manifest):
  *     stale-while-revalidate.
  */
 
-const VERSION = "study-compass-v2";
+const VERSION = "study-compass-v3";
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
-const PRECACHE_URLS = ["/", "/manifest.webmanifest", "/logo.svg"];
+// The service worker's scope ends in "/" and points at the app root, e.g.
+// "https://user.github.io/repo/". Relative URLs below resolve against the SW
+// script URL, so "./" is that same app root.
+const scopePath = new URL(self.registration.scope).pathname;
+const APP_SHELL = "./";
+const PRECACHE_URLS = [APP_SHELL, "./manifest.webmanifest", "./logo.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -55,12 +64,12 @@ self.addEventListener("fetch", (event) => {
   // opens offline, and refresh that copy in the background when possible.
   if (request.mode === "navigate") {
     event.respondWith(
-      caches.match("/").then((cached) => {
+      caches.match(APP_SHELL).then((cached) => {
         const refresh = fetch(request)
           .then((response) => {
             if (response.ok) {
               const copy = response.clone();
-              caches.open(SHELL_CACHE).then((cache) => cache.put("/", copy));
+              caches.open(SHELL_CACHE).then((cache) => cache.put(APP_SHELL, copy));
             }
             return response;
           })
@@ -71,11 +80,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Vite emits fingerprinted files under /assets/ (JS, CSS, images, fonts).
+  // Vite emits fingerprinted files under assets/ (JS, CSS, images, fonts).
   // Serve them cache-first and refresh the copy in the background.
   if (
-    url.pathname.startsWith("/assets/") ||
-    /\.(?:svg|png|jpe?g|webp|gif|ico|woff2?|webmanifest|css)$/.test(url.pathname)
+    url.pathname.startsWith(`${scopePath}assets/`) ||
+    /\.(?:svg|png|jpe?g|webp|gif|ico|woff2?|webmanifest|css|js)$/.test(url.pathname)
   ) {
     event.respondWith(
       caches.match(request).then((cached) => {
