@@ -1,18 +1,20 @@
 /*
  * Study Compass service worker.
  *
- * The planner, FSRS engine, progress tracking, and timetable are local-first
- * (IndexedDB via Dexie), so once the app shell is cached the core product opens
- * with no network. Auth and Convex API calls are intentionally left network-only:
- * they must never be served from a stale cache.
+ * The entire product is local-first: the planner, FSRS engine, progress
+ * tracking, and timetable live in IndexedDB (via Dexie), and there is no
+ * backend or API. So once the app shell is cached, Study Compass opens and
+ * runs with no network at all.
  *
  * Strategy:
- *   - App navigations: network-first, falling back to the cached shell offline.
- *   - Hashed static assets: stale-while-revalidate.
- *   - Everything else (Convex, auth): pass through to the network untouched.
+ *   - App navigations: cache-first, so a previously visited install opens
+ *     instantly offline; the cached shell is refreshed in the background
+ *     whenever a network connection is available.
+ *   - Hashed static assets (/assets/*, fonts, images, css, manifest):
+ *     stale-while-revalidate.
  */
 
-const VERSION = "study-compass-v1";
+const VERSION = "study-compass-v2";
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
@@ -49,17 +51,22 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Full-page loads and refreshes: try the network first so fresh deployments
-  // always win, and only reach for the cached shell when the network is gone.
+  // Full-page loads and refreshes: serve the cached shell first so the app
+  // opens offline, and refresh that copy in the background when possible.
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(SHELL_CACHE).then((cache) => cache.put("/", copy));
-          return response;
-        })
-        .catch(() => caches.match("/")),
+      caches.match("/").then((cached) => {
+        const refresh = fetch(request)
+          .then((response) => {
+            if (response.ok) {
+              const copy = response.clone();
+              caches.open(SHELL_CACHE).then((cache) => cache.put("/", copy));
+            }
+            return response;
+          })
+          .catch(() => cached);
+        return cached ?? refresh;
+      }),
     );
     return;
   }
