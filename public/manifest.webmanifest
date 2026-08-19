@@ -1,0 +1,18 @@
+{
+  "name": "Study Compass",
+  "short_name": "Compass",
+  "description": "Offline-first study planner and progress companion for customers of your business.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8f8fc",
+  "theme_color": "#3159b7",
+  "icons": [
+    {
+      "src": "./logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
